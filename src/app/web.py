@@ -16,8 +16,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
+from src.data.news_generator import NewsGenerator
 from src.llm import OllamaClient, PromptManager
 from src.strategies import ContinuousStrategy, EventDrivenStrategy
+from src.strategies.reactive_strategy import ReactiveStrategy
+from src.memory import ChromaMemoryManager, SlidingWindowMemoryManager
+from src.portfolio import PortfolioManager
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,7 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 4px solid #2ecc71;
         margin: 0.5rem 0;
+        color: #1a1a1a;
     }
     .data-box {
         background-color: #fff3cd;
@@ -59,6 +64,23 @@ st.markdown("""
         border-radius: 0.3rem;
         font-family: monospace;
         font-size: 0.9rem;
+        color: #1a1a1a;
+    }
+    .news-box {
+        background-color: #fff3e0;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #ff9800;
+        margin: 0.5rem 0;
+        color: #1a1a1a;
+    }
+    .news-positive {
+        border-left-color: #4caf50;
+        background-color: #e8f5e9;
+    }
+    .news-negative {
+        border-left-color: #f44336;
+        background-color: #ffebee;
     }
     .stButton>button {
         width: 100%;
@@ -84,6 +106,8 @@ if 'strategy' not in st.session_state:
     st.session_state.strategy = None
 if 'start_time' not in st.session_state:
     st.session_state.start_time = None
+if 'portfolio_manager' not in st.session_state:
+    st.session_state.portfolio_manager = None
 
 
 def load_config():
@@ -93,7 +117,7 @@ def load_config():
 
 
 def create_components(config, custom_settings):
-    """Create data source, simulator, LLM client, and strategy."""
+    """Create data source, simulator, LLM client, strategy, and portfolio manager."""
     # Create data source
     if custom_settings['data_source'] == 'sample':
         data_source = SampleDataSource(
@@ -102,40 +126,83 @@ def create_components(config, custom_settings):
         )
     else:
         data_source = CSVDataSource(custom_settings['csv_path'])
-    
+
+    # Create news generator if enabled
+    news_generator = None
+    if custom_settings.get('news_enabled', False):
+        news_generator = NewsGenerator(
+            symbols=custom_settings['symbols'],
+            events_per_day=custom_settings.get('news_events_per_day', 1.5),
+            enabled=True
+        )
+
     # Create simulator
     simulator = TradingDataSimulator(
         data_source=data_source,
         update_interval=custom_settings['update_interval'],
+        news_generator=news_generator,
     )
-    
+
     # Create LLM client
     llm_client = OllamaClient(
         model=custom_settings['model'],
         temperature=custom_settings['temperature'],
         max_tokens=custom_settings['max_tokens'],
     )
-    
+
     # Create prompt manager
     prompt_manager = PromptManager(
         system_prompt=custom_settings['system_prompt'],
     )
-    
+
+    # Create memory manager
+    memory_type = custom_settings.get('memory_type', 'sliding_window')
+    memory_manager = None
+
+    if memory_type == 'chromadb':
+        memory_config = config.get('memory', {}).get('chromadb', {})
+        memory_manager = ChromaMemoryManager(memory_config)
+    elif memory_type == 'sliding_window':
+        memory_config = config.get('memory', {}).get('sliding_window', {})
+        memory_manager = SlidingWindowMemoryManager(memory_config)
+    # else: memory_manager stays None (no memory management)
+
+    # Create portfolio manager if trading is enabled
+    portfolio_manager = None
+    if custom_settings.get('enable_trading', True):
+        portfolio_manager = PortfolioManager(
+            symbols=custom_settings['symbols'],
+            initial_cash_per_symbol=custom_settings.get('initial_cash_per_symbol', 1000.0)
+        )
+
     # Create strategy
-    if custom_settings['strategy'] == 'continuous':
+    strategy_type = custom_settings['strategy']
+    if strategy_type == 'continuous':
         strategy = ContinuousStrategy(
             llm_client,
             prompt_manager,
-            {'batch_size': custom_settings['batch_size']}
+            {'batch_size': custom_settings['batch_size'], 'memory': config.get('memory', {})},
+            memory_manager=memory_manager
         )
-    else:
+    elif strategy_type == 'reactive':
+        reactive_config = config['strategy'].get('reactive', {})
+        reactive_config['memory'] = config.get('memory', {})
+        reactive_config['enable_trading'] = custom_settings.get('enable_trading', True)
+        strategy = ReactiveStrategy(
+            llm_client,
+            prompt_manager,
+            reactive_config,
+            memory_manager=memory_manager,
+            portfolio_manager=portfolio_manager
+        )
+    else:  # event_driven
         strategy = EventDrivenStrategy(
             llm_client,
             prompt_manager,
             config['strategy'].get('event_driven', {})
         )
-    
-    return simulator, strategy
+
+    return simulator, strategy, portfolio_manager
 
 
 def process_stream(simulator, strategy, state_container):
@@ -196,9 +263,9 @@ with st.sidebar:
     
     st.subheader("Data Settings")
     data_source = st.selectbox("Data Source", ["sample", "csv"])
-    update_interval = st.slider("Update Interval (seconds)", 0.5, 10.0, 
+    update_interval = st.slider("Update Interval (seconds)", 0.5, 10.0,
                                 config['data']['update_interval'], 0.5)
-    
+
     if data_source == "sample":
         symbols_input = st.text_input("Symbols (comma-separated)", "AAPL,GOOGL,MSFT,TSLA")
         symbols = [s.strip() for s in symbols_input.split(',')]
@@ -208,22 +275,60 @@ with st.sidebar:
         symbols = []
         volatility = 0.02
         csv_path = st.text_input("CSV Path", "data/raw/trading_data.csv")
-    
+
+    # News injection settings
+    st.subheader("News Events")
+    news_enabled = st.checkbox("Enable News Injection",
+                               value=config['data'].get('news', {}).get('enabled', True),
+                               help="Inject generated news events 1-2 times per day")
+    if news_enabled:
+        news_events_per_day = st.slider("Events Per Day", 0.5, 5.0, 1.5, 0.5,
+                                        help="Average number of news events per day")
+    else:
+        news_events_per_day = 0
+
     st.subheader("Strategy Settings")
-    strategy_type = st.selectbox("Strategy", ["continuous", "event_driven"])
-    
+    strategy_type = st.selectbox("Strategy", ["reactive", "continuous", "event_driven"],
+                                 help="Reactive: LLM only responds to important events (RECOMMENDED)")
+
     if strategy_type == "continuous":
         batch_size = st.number_input("Batch Size", 1, 10, 1)
     else:
         batch_size = 1
-    
+
+    st.subheader("Memory Management")
+    memory_type = st.selectbox(
+        "Memory Type",
+        ["sliding_window", "chromadb", "none"],
+        help="Choose how to manage LLM context and history"
+    )
+
+    if memory_type == "sliding_window":
+        st.caption("Keeps recent data + summarizes old data")
+        window_size = st.number_input("Window Size", 5, 100, 20,
+                                      help="Number of recent items to keep in full detail")
+    elif memory_type == "chromadb":
+        st.caption("Vector database with semantic search")
+        top_k = st.number_input("Top K Retrieval", 1, 20, 5,
+                               help="Number of similar items to retrieve")
+
+    st.subheader("Trading Settings")
+    enable_trading = st.checkbox("Enable Portfolio Trading",
+                                 value=True,
+                                 help="Allow LLM to make buy/sell decisions with virtual portfolio")
+    if enable_trading:
+        initial_cash_per_symbol = st.number_input("Initial Cash Per Symbol", 100, 10000, 1000, 100,
+                                                  help="Starting cash allocation per stock (default: $1000)")
+    else:
+        initial_cash_per_symbol = 1000
+
     st.subheader("Prompt Settings")
     system_prompt = st.text_area(
         "System Prompt",
         value=config['prompts']['system_prompt'],
         height=150
     )
-    
+
     st.markdown("---")
     
     # Control buttons
@@ -245,14 +350,20 @@ with st.sidebar:
                     'strategy': strategy_type,
                     'batch_size': batch_size,
                     'system_prompt': system_prompt,
+                    'memory_type': memory_type,
+                    'news_enabled': news_enabled,
+                    'news_events_per_day': news_events_per_day,
+                    'enable_trading': enable_trading,
+                    'initial_cash_per_symbol': initial_cash_per_symbol,
                 }
-                
+
                 # Create components
-                simulator, strategy = create_components(config, custom_settings)
+                simulator, strategy, portfolio_manager = create_components(config, custom_settings)
 
                 # Initialize session state
                 st.session_state.simulator = simulator
                 st.session_state.strategy = strategy
+                st.session_state.portfolio_manager = portfolio_manager
                 st.session_state.running = True
                 st.session_state.start_time = datetime.now()
                 st.session_state.iteration = 0
@@ -360,34 +471,53 @@ with col4:
 st.markdown("---")
 
 # Create tabs for different views
-tab1, tab2, tab3, tab4 = st.tabs(["Live Data", "LLM Responses", "Charts", "History"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Live Data", "LLM Responses", "Portfolio", "Charts", "History"])
 
 with tab1:
     st.subheader("Current Data Point")
-    
+
     if st.session_state.current_data:
         data = st.session_state.current_data
-        
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
+
+        # Check if this is a news event
+        if data.get('type') == 'news':
+            # Display news event
+            sentiment = data.get('sentiment', 'neutral')
+            news_class = f"news-box news-{sentiment}"
+
             st.markdown(f"""
-            <div class="data-box">
+            <div class="{news_class}">
+            <h3>NEWS EVENT</h3>
             <strong>Symbol:</strong> {data.get('symbol', 'N/A')}<br>
-            <strong>Price:</strong> ${data.get('price', 0):.2f}<br>
-            <strong>Change:</strong> {data.get('change', 0):+.2f}%<br>
-            <strong>Volume:</strong> {data.get('volume', 0):,}<br>
+            <strong>Headline:</strong> {data.get('headline', 'No headline')}<br>
+            <strong>Sentiment:</strong> {sentiment.upper()}<br>
+            <strong>Impact:</strong> {data.get('impact', 'unknown').upper()}<br>
+            <strong>Category:</strong> {data.get('category', 'unknown')}<br>
             <strong>Timestamp:</strong> {data.get('timestamp', 'N/A')[:19]}
             </div>
             """, unsafe_allow_html=True)
-        
-        with col2:
-            # Price indicator
-            change = data.get('change', 0)
-            if change >= 0:
-                st.success(f"Price UP {change:.2f}%")
-            else:
-                st.error(f"Price DOWN {change:.2f}%")
+        else:
+            # Display regular trading data
+            col1, col2 = st.columns([1, 2])
+
+            with col1:
+                st.markdown(f"""
+                <div class="data-box">
+                <strong>Symbol:</strong> {data.get('symbol', 'N/A')}<br>
+                <strong>Price:</strong> ${data.get('price', 0):.2f}<br>
+                <strong>Change:</strong> {data.get('change', 0):+.2f}%<br>
+                <strong>Volume:</strong> {data.get('volume', 0):,}<br>
+                <strong>Timestamp:</strong> {data.get('timestamp', 'N/A')[:19]}
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col2:
+                # Price indicator
+                change = data.get('change', 0)
+                if change >= 0:
+                    st.success(f"Price UP {change:.2f}%")
+                else:
+                    st.error(f"Price DOWN {change:.2f}%")
     else:
         st.info("Waiting for data...")
 
@@ -418,40 +548,146 @@ with tab2:
         st.info("⏳ No responses yet. Waiting for LLM output...")
 
 with tab3:
+    st.subheader("Portfolio Performance")
+
+    if st.session_state.portfolio_manager:
+        portfolio = st.session_state.portfolio_manager
+        summary = portfolio.get_summary()
+
+        # Performance metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Portfolio Value", f"${summary['total_value']:.2f}",
+                     delta=f"{summary['total_return_pct']:.2f}%")
+
+        with col2:
+            st.metric("Cash Available", f"${summary['cash']:.2f}")
+
+        with col3:
+            st.metric("Buy & Hold Value", f"${summary['buy_hold_value']:.2f}",
+                     delta=f"{summary['buy_hold_return_pct']:.2f}%")
+
+        with col4:
+            outperf = summary['outperformance']
+            st.metric("Outperformance", f"{outperf:.2f}%",
+                     delta=f"{'Beating' if outperf > 0 else 'Trailing'} market")
+
+        st.markdown("---")
+
+        # Trading statistics
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Total Trades", summary['total_trades'])
+
+        with col2:
+            st.metric("Winning Trades", summary['winning_trades'])
+
+        with col3:
+            st.metric("Win Rate", f"{summary['win_rate']:.1f}%")
+
+        st.markdown("---")
+
+        # Current positions
+        st.subheader("Current Positions")
+
+        if summary['positions']:
+            for pos in summary['positions']:
+                with st.expander(f"{pos['symbol']} - {pos['shares']:.4f} shares"):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.write(f"**Average Cost:** ${pos['avg_cost']:.2f}")
+                        st.write(f"**Current Price:** ${pos['current_price']:.2f}")
+                        st.write(f"**Position Value:** ${pos['value']:.2f}")
+
+                    with col2:
+                        profit_loss = pos['profit_loss']
+                        profit_loss_pct = pos['profit_loss_pct']
+
+                        if profit_loss >= 0:
+                            st.success(f"**Profit:** ${profit_loss:.2f} ({profit_loss_pct:.2f}%)")
+                        else:
+                            st.error(f"**Loss:** ${profit_loss:.2f} ({profit_loss_pct:.2f}%)")
+        else:
+            st.info("No open positions")
+
+        # Recent trades
+        if portfolio.trades:
+            st.markdown("---")
+            st.subheader("Recent Trades (Last 10)")
+
+            recent_trades = portfolio.trades[-10:]
+            for trade in reversed(recent_trades):
+                trade_dict = trade.to_dict()
+                action_color = "🟢" if trade_dict['action'] == 'buy' else "🔴"
+                st.caption(
+                    f"{action_color} {trade_dict['action'].upper()} {trade_dict['shares']:.4f} shares of "
+                    f"{trade_dict['symbol']} @ ${trade_dict['price']:.2f} = ${trade_dict['total']:.2f} "
+                    f"({trade_dict['timestamp'][:19]})"
+                )
+    else:
+        st.info("Portfolio trading is disabled. Enable it in the sidebar to track performance.")
+
+with tab4:
     st.subheader("Price Charts")
-    
+
     if len(st.session_state.data_history) > 1:
         # Create DataFrame from history
         df = pd.DataFrame(st.session_state.data_history)
-        
-        # Group by symbol
-        symbols = df['symbol'].unique()
-        
-        # Create subplots
+
+        # Convert timestamp to datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        # Define fixed symbol order and colors
+        # Get all unique symbols and sort them alphabetically for consistency
+        all_symbols = sorted(df['symbol'].unique())
+
+        # Define a fixed color palette
+        color_palette = {
+            0: '#1f77b4',  # Blue
+            1: '#ff7f0e',  # Orange
+            2: '#2ca02c',  # Green
+            3: '#d62728',  # Red
+            4: '#9467bd',  # Purple
+            5: '#8c564b',  # Brown
+            6: '#e377c2',  # Pink
+            7: '#7f7f7f',  # Gray
+        }
+
+        # Assign fixed colors to symbols
+        symbol_colors = {symbol: color_palette[i % len(color_palette)]
+                        for i, symbol in enumerate(all_symbols)}
+
+        # Create subplots with fixed order
         fig = make_subplots(
-            rows=len(symbols), cols=1,
-            subplot_titles=[f"{symbol} Price Movement" for symbol in symbols],
+            rows=len(all_symbols), cols=1,
+            subplot_titles=[f"{symbol} Price Movement" for symbol in all_symbols],
             vertical_spacing=0.1
         )
-        
-        for idx, symbol in enumerate(symbols, 1):
-            symbol_data = df[df['symbol'] == symbol]
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=list(range(len(symbol_data))),
-                    y=symbol_data['price'],
-                    mode='lines+markers',
-                    name=symbol,
-                    line=dict(width=2),
-                ),
-                row=idx, col=1
-            )
-        
-        fig.update_layout(height=300*len(symbols), showlegend=True)
-        fig.update_xaxes(title_text="Data Point")
+
+        # Add traces in fixed order
+        for idx, symbol in enumerate(all_symbols, 1):
+            symbol_data = df[df['symbol'] == symbol].sort_values('timestamp')
+
+            if len(symbol_data) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=symbol_data['timestamp'],
+                        y=symbol_data['price'],
+                        mode='lines+markers',
+                        name=symbol,
+                        line=dict(width=2, color=symbol_colors[symbol]),
+                        marker=dict(size=4, color=symbol_colors[symbol]),
+                    ),
+                    row=idx, col=1
+                )
+
+        fig.update_layout(height=300*len(all_symbols), showlegend=True)
+        fig.update_xaxes(title_text="Time")
         fig.update_yaxes(title_text="Price ($)")
-        
+
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("⏳ Collecting data for charts...")

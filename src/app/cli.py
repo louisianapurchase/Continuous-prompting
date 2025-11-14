@@ -13,8 +13,12 @@ import signal
 import sys
 
 from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
+from src.data.news_generator import NewsGenerator
 from src.llm import OllamaClient, PromptManager
 from src.strategies import ContinuousStrategy, EventDrivenStrategy
+from src.strategies.reactive_strategy import ReactiveStrategy
+from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
+from src.portfolio import PortfolioManager
 from src.utils import setup_logger, MetricsTracker, TerminalDisplay, CompactDisplay
 
 
@@ -69,26 +73,58 @@ def create_data_source(config: dict):
         raise ValueError(f"Unknown data source type: {source_type}")
 
 
-def create_strategy(config: dict, llm_client, prompt_manager):
+def create_memory_manager(config: dict):
+    """
+    Create memory manager based on configuration.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Memory manager instance or None
+    """
+    memory_config = config.get('memory', {})
+    memory_type = memory_config.get('type', 'sliding_window')
+
+    if memory_type == 'none':
+        return None
+    elif memory_type == 'sliding_window':
+        return SlidingWindowMemoryManager(memory_config.get('sliding_window', {}))
+    elif memory_type == 'chromadb':
+        return ChromaMemoryManager(memory_config.get('chromadb', {}))
+    else:
+        logging.warning(f"Unknown memory type: {memory_type}, using sliding window")
+        return SlidingWindowMemoryManager({})
+
+
+def create_strategy(config: dict, llm_client, prompt_manager, portfolio_manager=None):
     """
     Create prompting strategy based on configuration.
-    
+
     Args:
         config: Configuration dictionary
         llm_client: LLM client instance
         prompt_manager: Prompt manager instance
-        
+        portfolio_manager: Portfolio manager instance (optional)
+
     Returns:
         Strategy instance
     """
     strategy_type = config['strategy']['type']
-    
+    memory_manager = create_memory_manager(config)
+
     if strategy_type == 'continuous':
         strategy_config = config['strategy'].get('continuous', {})
-        return ContinuousStrategy(llm_client, prompt_manager, strategy_config)
+        strategy_config['memory'] = config.get('memory', {})
+        return ContinuousStrategy(llm_client, prompt_manager, strategy_config, memory_manager)
     elif strategy_type == 'event_driven':
         strategy_config = config['strategy'].get('event_driven', {})
-        return EventDrivenStrategy(llm_client, prompt_manager, strategy_config)
+        strategy_config['memory'] = config.get('memory', {})
+        return EventDrivenStrategy(llm_client, prompt_manager, strategy_config, memory_manager)
+    elif strategy_type == 'reactive':
+        strategy_config = config['strategy'].get('reactive', {})
+        strategy_config['memory'] = config.get('memory', {})
+        return ReactiveStrategy(llm_client, prompt_manager, strategy_config, memory_manager, portfolio_manager)
     else:
         raise ValueError(f"Unknown strategy type: {strategy_type}")
 
@@ -150,11 +186,25 @@ def main():
         
         # Create data source
         data_source = create_data_source(config)
-        
+
+        # Create news generator if enabled
+        news_config = config['data'].get('news', {})
+        news_generator = None
+        if news_config.get('enabled', False):
+            sample_config = config['data'].get('sample', {})
+            symbols = sample_config.get('symbols', ['AAPL', 'GOOGL', 'MSFT', 'TSLA'])
+            news_generator = NewsGenerator(
+                symbols=symbols,
+                events_per_day=news_config.get('events_per_day', 1.5),
+                enabled=True
+            )
+            logger.info("News generation enabled")
+
         # Create data simulator
         simulator = TradingDataSimulator(
             data_source=data_source,
             update_interval=config['data']['update_interval'],
+            news_generator=news_generator,
         )
         
         # Create LLM client
@@ -173,9 +223,21 @@ def main():
             continuous_prompt_template=prompts.get('continuous_prompt'),
             event_prompt_template=prompts.get('event_prompt'),
         )
-        
+
+        # Create portfolio manager if trading is enabled
+        portfolio_manager = None
+        trading_config = config.get('trading', {})
+        if trading_config.get('enabled', True):
+            sample_config = config['data'].get('sample', {})
+            symbols = sample_config.get('symbols', ['AAPL', 'GOOGL', 'MSFT', 'TSLA'])
+            portfolio_manager = PortfolioManager(
+                symbols=symbols,
+                initial_cash_per_symbol=trading_config.get('initial_cash_per_symbol', 1000.0)
+            )
+            logger.info(f"Portfolio trading enabled: ${trading_config.get('initial_cash_per_symbol', 1000.0)} per symbol")
+
         # Create strategy
-        strategy = create_strategy(config, llm_client, prompt_manager)
+        strategy = create_strategy(config, llm_client, prompt_manager, portfolio_manager)
         
         # Create metrics tracker
         experiment_config = config.get('experiment', {})
@@ -253,7 +315,7 @@ def main():
         # Cleanup
         logger.info("\nStopping data stream...")
         simulator.stop()
-        
+
         # Print statistics
         logger.info("\n" + "="*60)
         logger.info("Experiment Statistics")
@@ -261,12 +323,35 @@ def main():
         stats = strategy.get_stats()
         for key, value in stats.items():
             logger.info(f"{key}: {value}")
-        
+
+        # Print portfolio summary if trading was enabled
+        if portfolio_manager:
+            logger.info("\n" + "="*60)
+            logger.info("Portfolio Performance")
+            logger.info("="*60)
+            summary = portfolio_manager.get_summary()
+            logger.info(f"Initial Value: ${portfolio_manager.total_initial_cash:.2f}")
+            logger.info(f"Final Value: ${summary['total_value']:.2f}")
+            logger.info(f"Cash Remaining: ${summary['cash']:.2f}")
+            logger.info(f"Portfolio Return: {summary['total_return_pct']:.2f}%")
+            logger.info(f"Buy & Hold Return: {summary['buy_hold_return_pct']:.2f}%")
+            logger.info(f"Outperformance: {summary['outperformance']:.2f}%")
+            logger.info(f"Total Trades: {summary['total_trades']}")
+            logger.info(f"Winning Trades: {summary['winning_trades']}")
+            logger.info(f"Losing Trades: {summary['losing_trades']}")
+            logger.info(f"Win Rate: {summary['win_rate']:.1f}%")
+
+            if summary['positions']:
+                logger.info("\nOpen Positions:")
+                for pos in summary['positions']:
+                    logger.info(f"  {pos['symbol']}: {pos['shares']:.4f} shares @ ${pos['avg_cost']:.2f} "
+                              f"(Current: ${pos['current_price']:.2f}, P/L: ${pos['profit_loss']:.2f})")
+
         # Save metrics
         if config['logging'].get('save_metrics', True):
             metrics.save()
             metrics.print_summary()
-        
+
         logger.info("="*60)
         logger.info("Experiment completed successfully!")
         logger.info("="*60)

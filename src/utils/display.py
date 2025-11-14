@@ -47,37 +47,72 @@ class TerminalDisplay:
     def print_data_point(self, data: Dict[str, Any], iteration: int):
         """
         Print a data point in a compact, non-spammy way.
-        
+
         Args:
             data: Data point dictionary
             iteration: Current iteration number
         """
         self.data_count += 1
         self.last_data = data
-        
+
         if self.show_data_stream:
-            # Compact one-line format
-            symbol = data.get('symbol', 'N/A')
-            price = data.get('price', 0)
-            change = data.get('change', 0)
-            volume = data.get('volume', 0)
-            timestamp = data.get('timestamp', '')[:19]  # Trim to readable format
-            
-            # Color code the change
-            change_color = '\033[92m' if change >= 0 else '\033[91m'  # Green/Red
-            reset_color = '\033[0m'
-            
-            status = (
-                f"[{iteration:4d}] {timestamp} | "
-                f"{symbol:6s} ${price:7.2f} "
-                f"{change_color}{change:+6.2f}%{reset_color} | "
-                f"Vol: {volume:,}"
-            )
-            
-            # Overwrite the same line for continuous updates
-            self.clear_line()
-            sys.stdout.write(status)
-            sys.stdout.flush()
+            # Check if this is a news event
+            if data.get('type') == 'news':
+                # News events get special formatting
+                self._print_news_event(data, iteration)
+            else:
+                # Regular trading data
+                # Compact one-line format
+                symbol = data.get('symbol', 'N/A')
+                price = data.get('price', 0)
+                change = data.get('change', 0)
+                volume = data.get('volume', 0)
+                timestamp = data.get('timestamp', '')[:19]  # Trim to readable format
+
+                # Color code the change
+                change_color = '\033[92m' if change >= 0 else '\033[91m'  # Green/Red
+                reset_color = '\033[0m'
+
+                status = (
+                    f"[{iteration:4d}] {timestamp} | "
+                    f"{symbol:6s} ${price:7.2f} "
+                    f"{change_color}{change:+6.2f}%{reset_color} | "
+                    f"Vol: {volume:,}"
+                )
+
+                # Overwrite the same line for continuous updates
+                self.clear_line()
+                sys.stdout.write(status)
+                sys.stdout.flush()
+
+    def _print_news_event(self, data: Dict[str, Any], iteration: int):
+        """Print a news event with special formatting."""
+        self.clear_line()
+        print()  # New line
+
+        # Color based on sentiment
+        sentiment = data.get('sentiment', 'neutral')
+        if sentiment == 'positive':
+            color = '\033[92m'  # Green
+        elif sentiment == 'negative':
+            color = '\033[91m'  # Red
+        else:
+            color = '\033[93m'  # Yellow
+        reset = '\033[0m'
+
+        impact = data.get('impact', 'unknown').upper()
+        symbol = data.get('symbol', 'N/A')
+        headline = data.get('headline', 'No headline')
+        timestamp = data.get('timestamp', '')[:19]
+
+        print(f"\n{'='*80}")
+        print(f"{color}NEWS EVENT [{impact} IMPACT]{reset}".center(90))
+        print(f"{'='*80}")
+        print(f"[{iteration:4d}] {timestamp}")
+        print(f"Symbol: {symbol}")
+        print(f"Sentiment: {color}{sentiment.upper()}{reset}")
+        print(f"Headline: {headline}")
+        print(f"{'='*80}\n")
     
     def print_llm_response(
         self,

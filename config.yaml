@@ -13,26 +13,36 @@ llm:
 data:
   update_interval: 1.0  # seconds between data updates
   source: "sample"      # Options: sample, csv, random
-  
+
   # For CSV source
   csv_path: "data/raw/trading_data.csv"
-  
+
   # Sample data configuration
   sample:
     symbols: ["AAPL", "GOOGL", "MSFT", "TSLA"]
     price_volatility: 0.02  # 2% price movement range
     volume_range: [1000, 10000]
 
+  # News injection configuration
+  news:
+    enabled: true           # Enable/disable news events
+    events_per_day: 1.5     # Average number of news events per day (1-2 events)
+
+# Portfolio Trading Configuration
+trading:
+  enabled: true                  # Enable/disable portfolio trading
+  initial_cash_per_symbol: 1000  # Starting cash allocation per stock ($1000 default)
+
 # Prompting Strategy Configuration
 strategy:
-  type: "continuous"  # Options: continuous, event_driven, adaptive
-  
+  type: "reactive"  # Options: continuous, event_driven, reactive
+
   # Continuous strategy settings
   continuous:
     batch_size: 1  # Number of data points before prompting
     include_history: true
     max_history_length: 10  # Number of previous data points to include
-  
+
   # Event-driven strategy settings
   event_driven:
     triggers:
@@ -42,11 +52,41 @@ strategy:
         threshold: 2.0   # 2x average volume
       - type: "time_interval"
         interval: 10     # seconds
-  
-  # Adaptive strategy settings
-  adaptive:
-    let_llm_decide: true
-    decision_prompt: "Should I analyze this data point or continue observing?"
+
+  # Reactive strategy settings (RECOMMENDED)
+  # LLM sees all data but only responds when something important happens
+  reactive:
+    check_interval: 1        # Check triggers every N data points
+    alert_cooldown: 60       # Minimum seconds between alerts for same symbol
+    triggers:
+      - type: "price_change"
+        threshold: 0.03      # 3% price change triggers alert
+      - type: "volume_spike"
+        threshold: 2.5       # 2.5x average volume triggers alert
+      - type: "news_event"   # Any news event triggers alert
+      - type: "pattern"
+        pattern_type: "consecutive_moves"
+        count: 3             # 3 consecutive moves in same direction
+      - type: "time_interval"
+        interval: 300        # Periodic check-in every 300 data points (~5 min)
+
+# Memory Management Configuration
+memory:
+  type: "sliding_window"  # Options: sliding_window, chromadb, none
+
+  # Sliding Window Memory Settings
+  sliding_window:
+    window_size: 20           # Number of recent items to keep in full detail
+    summary_batch_size: 10    # Items per summary batch
+    max_summaries: 10         # Maximum number of summaries to keep
+    enable_llm_summary: false # Use LLM for summaries (experimental)
+
+  # ChromaDB Vector Memory Settings
+  chromadb:
+    collection_name: "trading_data"
+    persist_directory: "./data/chroma"
+    top_k: 5                  # Number of similar items to retrieve
+    embedding_model: "all-MiniLM-L6-v2"
 
 # Prompt Templates
 prompts:
