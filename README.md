@@ -2,6 +2,22 @@
 
 An experimental framework for exploring continuous LLM prompting with streaming data. This project investigates methods for effectively prompting Large Language Models with continuously streaming trading data, addressing the core challenge of maintaining context and memory across thousands of data points.
 
+## Recent Updates (November 2025)
+
+**Major Frontend Overhaul:**
+- **Replaced Streamlit with Flask** - No more page reloads!
+- **Real-time updates via Server-Sent Events (SSE)** - True live streaming
+- **Modern UI with Tailwind CSS** - Clean, professional design
+- **Live-updating charts with Chart.js** - Smooth animations, no flickering
+- **Portfolio tracking** - Virtual trading with LLM-driven decisions
+- **Batch data processing** - LLM sees all 4 stocks simultaneously
+- **Reactive strategy improvements** - LLM decides when to respond (no artificial thresholds)
+- **Fixed price volatility** - Realistic 0.1% changes per second
+- **Persistent portfolio** - No more resets on page reload
+
+**Why the change?**
+Streamlit's constant page reloads were frustrating and inefficient. The new Flask interface provides true real-time updates without any page refreshes, making the experience much smoother and more professional.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -48,10 +64,12 @@ We've implemented two memory management strategies to address these challenges:
 - Reactive strategy: LLM only responds to important events (RECOMMENDED)
 - Built-in memory management (vector DB + sliding window)
 - Ollama LLM integration (local, private, free)
-- Web interface (Streamlit) with live charts and controls
+- **Modern Flask web interface with real-time updates (no page reloads!)**
+- Live-updating charts with Chart.js
+- Server-Sent Events (SSE) for true real-time streaming
+- Portfolio tracking with LLM-driven trading decisions
 - CLI interface for terminal-based experiments
 - Configurable prompts, parameters, and triggers
-- CSV export for offline analysis
 
 ## Installation
 
@@ -105,22 +123,29 @@ pip install chromadb sentence-transformers
 ### Web Interface (Recommended)
 
 ```bash
-python run_web.py
+python frontend/app.py
 ```
 
-Your browser will open automatically to `http://localhost:8501`
+Open your browser to `http://localhost:5000`
 
 **What you'll see:**
-- Live Data tab: Real-time streaming trading data
-- LLM Responses tab: AI analysis as it happens
-- Charts tab: Interactive price visualizations
-- History tab: Full data table with CSV download
+- **Live Stock Prices**: Real-time price updates with color-coded changes (no page reloads!)
+- **Price Movement Chart**: Live-updating chart showing all 4 stocks
+- **Portfolio Performance**: Cash, portfolio value, profit/loss, trade statistics
+- **LLM Responses**: AI analysis as it happens, streamed in real-time
 
 **Quick experiment:**
-1. Click "Start" in the sidebar
-2. Watch data stream in the Live Data tab
-3. Switch to LLM Responses tab to see AI analysis
-4. Click "Stop" when done
+1. Click "Start" button
+2. Watch live data stream and charts update automatically
+3. See LLM responses appear in real-time
+4. Monitor portfolio performance
+5. Click "Stop" when done
+
+**Why Flask instead of Streamlit?**
+- **No page reloads** - True real-time updates via Server-Sent Events
+- **Smooth chart updates** - Charts update live without flickering
+- **Better performance** - Lightweight and fast
+- **Modern UI** - Clean design with Tailwind CSS
 
 ### Command Line Interface
 
@@ -143,30 +168,36 @@ python run.py --display minimal    # Minimal output (logs only)
 
 ```
 continuous-prompting/
+├── frontend/             # Flask web interface
+│   ├── app.py            # Flask application with SSE
+│   └── templates/
+│       └── index.html    # Modern UI with Tailwind CSS
 ├── src/
 │   ├── app/              # User interfaces
-│   │   ├── cli.py        # Command-line interface
-│   │   └── web.py        # Streamlit web interface
+│   │   └── cli.py        # Command-line interface
 │   ├── data/             # Data streaming layer
-│   │   ├── base_source.py
-│   │   ├── sample_source.py
-│   │   └── simulator.py  # Main data streaming orchestrator
+│   │   ├── data_sources.py
+│   │   ├── data_simulator.py
+│   │   └── news_generator.py
 │   ├── llm/              # LLM integration
-│   │   ├── ollama_client.py
-│   │   └── prompt_manager.py
+│   │   └── ollama_client.py
 │   ├── strategies/       # Prompting strategies
 │   │   ├── base_strategy.py
-│   │   ├── continuous_strategy.py
-│   │   └── event_driven_strategy.py
+│   │   ├── reactive_strategy.py  # RECOMMENDED
+│   │   └── continuous_strategy.py
 │   ├── memory/           # Memory management
 │   │   ├── base_memory.py
-│   │   ├── chroma_memory.py
-│   │   └── sliding_window_memory.py
+│   │   ├── chromadb_memory.py
+│   │   └── sliding_window.py
+│   ├── portfolio/        # Portfolio management
+│   │   └── portfolio_manager.py
+│   ├── prompts/          # Prompt management
+│   │   └── prompt_manager.py
 │   └── utils/            # Utilities
+│       ├── config_loader.py
 │       └── display.py
 ├── config.yaml           # Configuration file
 ├── run.py                # CLI launcher
-├── run_web.py            # Web launcher
 └── requirements.txt      # Dependencies
 ```
 
@@ -192,9 +223,15 @@ continuous-prompting/
 - `SlidingWindowMemoryManager`: Recent data + statistical summaries
 - `ChromaMemoryManager`: Vector database with semantic search
 
-**5. Interface Layer (`src/app/`)**
-- `cli.py`: Terminal-based interface
-- `web.py`: Streamlit web dashboard
+**5. Interface Layer (`frontend/` and `src/app/`)**
+- `frontend/app.py`: Flask web application with Server-Sent Events
+- `frontend/templates/index.html`: Modern UI with real-time updates
+- `src/app/cli.py`: Terminal-based interface
+
+**6. Portfolio Layer (`src/portfolio/`)**
+- `PortfolioManager`: Manages virtual trading portfolio
+- Tracks cash, positions, trades, profit/loss
+- Executes LLM trading decisions (BUY/SELL/HOLD)
 
 ## Data Pipeline
 
@@ -577,80 +614,99 @@ class MyCustomStrategy(BaseStrategy):
 ### Launching
 
 ```bash
-python run_web.py
+python frontend/app.py
 ```
 
-Or use the script:
-```bash
-# Windows
-scripts\run_web.bat
-
-# Linux/Mac
-chmod +x scripts/run_web.sh
-./scripts/run_web.sh
-```
+The server will start on `http://localhost:5000`. Open this URL in your browser.
 
 ### Interface Overview
 
-**Sidebar - Configuration Panel:**
-- LLM Settings: Model, temperature, max tokens
-- Data Settings: Source, update interval, symbols, volatility
-- Strategy Settings: Type, batch size
-- Memory Settings: Type, window size, top-k
-- Prompt Settings: System prompt customization
-- Control Buttons: Start, Stop, Reset
+**Header:**
+- Status indicator (Running/Stopped with animated dot)
+- Control buttons: Start, Stop, Reset
+- Real-time status updates
 
-**Main Dashboard:**
+**Top Metrics Bar (4 cards):**
+- **Data Points**: Total data points processed
+- **LLM Responses**: Total LLM responses generated
+- **Cash Available**: Current cash in portfolio
+- **Portfolio Value**: Total portfolio value (stocks + cash)
 
-**Top Metrics Bar:**
-- Data Points: Total processed
-- LLM Responses: Total generated
-- Elapsed Time: Experiment duration
-- Response Rate: Percentage of data points that triggered responses
+**Left Column:**
 
-**Tab 1: Live Data**
-- Current data point being processed
-- Symbol, price, change, volume, timestamp
-- Visual indicators for price movement
+**Live Stock Prices Card:**
+- Real-time price updates for all 4 stocks (AAPL, GOOGL, MSFT, TSLA)
+- Color-coded price changes (green = up, red = down)
+- Timestamp for each update
+- **Updates live without page reload!**
 
-**Tab 2: LLM Responses**
-- All LLM responses in chronological order (newest first)
-- Each response shows: iteration, timestamp, data point, full response
-- Clean formatted boxes for easy reading
+**Price Movement Chart:**
+- Live-updating line chart showing all 4 stocks
+- Color-coded lines (AAPL=blue, GOOGL=red, MSFT=green, TSLA=orange)
+- Last 50 data points visible
+- Smooth updates without redrawing entire chart
 
-**Tab 3: Charts**
-- Interactive price charts for all symbols
-- Separate subplot for each stock
-- Zoom, pan, hover for exact values
-- Auto-updates as new data arrives
+**Right Column:**
 
-**Tab 4: History**
-- Full data table with all processed data points
-- Sortable and searchable
-- Download CSV button for export
+**Portfolio Performance Card:**
+- Total Trades, Winning Trades, Win Rate
+- Profit/Loss with percentage
+- Color-coded (green = profit, red = loss)
+- Updates in real-time as trades execute
+
+**LLM Responses Card:**
+- Scrollable list of all LLM responses
+- Newest responses appear at top
+- Each response shows:
+  - Timestamp
+  - Stock prices at time of response
+  - Full LLM analysis
+- Auto-scrolls as new responses arrive
+
+### How It Works (Technical)
+
+**Server-Sent Events (SSE):**
+- Flask backend streams events to frontend via `/stream` endpoint
+- Frontend connects with `EventSource` API
+- Events pushed in real-time: data updates, LLM responses, portfolio updates
+- No polling, no page reloads - true push-based updates
+
+**Event Types:**
+- `data`: New stock price data (updates prices and chart)
+- `response`: New LLM response (adds to response list)
+- `portfolio`: Portfolio update (updates metrics)
+- `heartbeat`: Keep-alive ping every 5 seconds
+
+**API Endpoints:**
+- `GET /`: Main page
+- `POST /api/start`: Start simulation
+- `POST /api/stop`: Stop simulation
+- `POST /api/reset`: Reset simulation
+- `GET /api/status`: Get current status
+- `GET /api/portfolio`: Get portfolio summary
+- `GET /stream`: SSE stream for real-time updates
 
 ### Usage Tips
 
 **For quick experiments:**
-1. Keep default settings
-2. Click "Start"
-3. Watch Live Data tab
-4. Switch to LLM Responses tab
+1. Click "Start" button
+2. Watch live stock prices update
+3. See chart update in real-time
+4. Monitor LLM responses as they appear
 5. Click "Stop" when done
 
-**For detailed analysis:**
-1. Configure settings in sidebar
-2. Start experiment
-3. Monitor Charts tab for trends
-4. Review responses in LLM Responses tab
-5. Download data from History tab
+**For portfolio tracking:**
+1. Start simulation
+2. Watch portfolio metrics update
+3. See LLM make trading decisions (BUY/SELL/HOLD)
+4. Monitor profit/loss in real-time
+5. Check win rate and trade statistics
 
 **For comparing strategies:**
-1. Run with continuous strategy
-2. Note response rate and quality
-3. Click Reset
-4. Switch to event-driven strategy
-5. Run again and compare
+1. Edit `config.yaml` to change strategy
+2. Click "Reset" to clear data
+3. Click "Start" to run with new strategy
+4. Compare response frequency and quality
 
 
 
@@ -1010,11 +1066,17 @@ Traditional LLM prompting is one-shot: you send a prompt, get a response, done. 
 - Progress tracking
 - Statistics reporting
 
-**src/app/web.py:**
-- Streamlit interface components
-- Session state management
-- Background thread for data streaming
-- Real-time chart updates
+**frontend/app.py:**
+- Flask application with Server-Sent Events
+- Real-time data streaming via SSE
+- Background thread for simulation
+- API endpoints for control (start/stop/reset)
+
+**frontend/templates/index.html:**
+- Modern UI with Tailwind CSS
+- Chart.js for live-updating charts
+- JavaScript EventSource for SSE connection
+- Real-time DOM updates without page reloads
 
 **src/data/simulator.py:**
 - Main orchestrator for data streaming
@@ -1198,11 +1260,15 @@ pip install -r requirements.txt
 
 **Web interface won't load:**
 ```bash
-# Try a different port
-streamlit run src/app/web.py --server.port 8502
+# Check if Flask is installed
+pip install flask
 
-# Check if Streamlit is installed
-pip install streamlit
+# Try a different port (edit frontend/app.py, change port=5000 to port=5001)
+python frontend/app.py
+
+# Check if port 5000 is already in use
+# Windows: netstat -ano | findstr :5000
+# Linux/Mac: lsof -i :5000
 ```
 
 **ChromaDB errors:**
@@ -1246,7 +1312,9 @@ This project is provided as-is for educational and research purposes.
 ### Acknowledgments
 
 - Ollama for local LLM inference
-- Streamlit for the web interface framework
+- Flask for the web framework
+- Chart.js for live-updating charts
+- Tailwind CSS for modern UI styling
 - ChromaDB for vector storage
 - The open-source LLM community
 

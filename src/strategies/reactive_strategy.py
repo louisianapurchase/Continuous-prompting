@@ -79,49 +79,106 @@ class ReactiveStrategy(BaseStrategy):
     def process_data_point(self, data: Dict[str, Any]) -> Optional[str]:
         """
         Process a new data point reactively.
-        
+
         The LLM sees all data (stored in memory) but only responds when
         something important is detected.
-        
+
         Args:
-            data: New data point
-            
+            data: New data point (can be a single stock or a batch of stocks)
+
         Returns:
             LLM response if triggered, None otherwise
         """
-        # Always add to history and memory
-        self.add_to_history(data)
-        self.data_buffer.append(data)
-        
-        # Update baseline metrics
-        self._update_baseline_metrics(data)
-        
-        # Check if we should evaluate triggers
-        self.data_points_since_check += 1
-        
-        # Evaluate triggers
-        triggered, trigger_info = self._evaluate_triggers(data)
-        
-        if triggered:
-            # Generate LLM response
-            response = self._generate_alert(data, trigger_info)
-            
-            # Store in memory with response
-            self.memory_manager.add_data_point(data, response)
-            
-            # Update last alert time
-            symbol = data.get('symbol', 'UNKNOWN')
-            from datetime import datetime
-            self.last_alert_time[symbol] = datetime.now()
-            
-            # Reset check counter
-            self.data_points_since_check = 0
-            
-            return response
+        # Handle batch data (all stocks at once)
+        if data.get('type') == 'batch':
+            stocks = data.get('stocks', [])
+
+            # Update portfolio prices for all stocks
+            if self.portfolio_manager:
+                for stock_data in stocks:
+                    symbol = stock_data.get('symbol')
+                    price = stock_data.get('price')
+                    if symbol and price:
+                        self.portfolio_manager.update_price(symbol, price)
+
+            # Add batch to history and memory
+            self.add_to_history(data)
+            self.data_buffer.append(data)
+
+            # Update baseline metrics for each stock
+            for stock_data in stocks:
+                self._update_baseline_metrics(stock_data)
+
+            # Check if we should evaluate triggers
+            self.data_points_since_check += 1
+
+            # Evaluate triggers across all stocks in the batch
+            triggered, trigger_info = self._evaluate_triggers_batch(stocks)
+
+            if triggered:
+                # Generate LLM response with ALL stocks visible
+                response = self._generate_alert_batch(data, trigger_info)
+
+                # Store in memory with response
+                self.memory_manager.add_data_point(data, response)
+
+                # Update last alert time
+                from datetime import datetime
+                for stock_data in stocks:
+                    symbol = stock_data.get('symbol', 'UNKNOWN')
+                    self.last_alert_time[symbol] = datetime.now()
+
+                # Reset check counter
+                self.data_points_since_check = 0
+
+                return response
+            else:
+                # Store in memory without response (silent observation)
+                self.memory_manager.add_data_point(data, None)
+                return None
+
         else:
-            # Store in memory without response (silent observation)
-            self.memory_manager.add_data_point(data, None)
-            return None
+            # Single stock data point (legacy)
+            # Always add to history and memory
+            self.add_to_history(data)
+            self.data_buffer.append(data)
+
+            # Update portfolio prices on EVERY data point (not just alerts)
+            if self.portfolio_manager and data.get('type') != 'news':
+                symbol = data.get('symbol')
+                price = data.get('price')
+                if symbol and price:
+                    self.portfolio_manager.update_price(symbol, price)
+
+            # Update baseline metrics
+            self._update_baseline_metrics(data)
+
+            # Check if we should evaluate triggers
+            self.data_points_since_check += 1
+
+            # Evaluate triggers
+            triggered, trigger_info = self._evaluate_triggers(data)
+
+            if triggered:
+                # Generate LLM response
+                response = self._generate_alert(data, trigger_info)
+
+                # Store in memory with response
+                self.memory_manager.add_data_point(data, response)
+
+                # Update last alert time
+                symbol = data.get('symbol', 'UNKNOWN')
+                from datetime import datetime
+                self.last_alert_time[symbol] = datetime.now()
+
+                # Reset check counter
+                self.data_points_since_check = 0
+
+                return response
+            else:
+                # Store in memory without response (silent observation)
+                self.memory_manager.add_data_point(data, None)
+                return None
     
     def _evaluate_triggers(self, data: Dict[str, Any]) -> tuple[bool, Dict[str, Any]]:
         """
@@ -169,7 +226,27 @@ class ReactiveStrategy(BaseStrategy):
                     return True, {'type': 'time_interval', **info}
         
         return False, {}
-    
+
+    def _evaluate_triggers_batch(self, stocks: List[Dict[str, Any]]) -> tuple[bool, Dict[str, Any]]:
+        """
+        Evaluate triggers across a batch of stocks.
+
+        Args:
+            stocks: List of stock data points
+
+        Returns:
+            Tuple of (should_trigger, trigger_info)
+        """
+        # Check if any stock triggers
+        for stock_data in stocks:
+            triggered, info = self._evaluate_triggers(stock_data)
+            if triggered:
+                # Return info about which stock triggered
+                info['triggered_symbol'] = stock_data.get('symbol')
+                return True, info
+
+        return False, {}
+
     def _check_cooldown(self, symbol: str) -> bool:
         """Check if enough time has passed since last alert for this symbol."""
         if symbol not in self.last_alert_time:
@@ -298,13 +375,6 @@ class ReactiveStrategy(BaseStrategy):
         Returns:
             LLM response
         """
-        # Update portfolio prices
-        if self.portfolio_manager and data.get('type') != 'news':
-            symbol = data.get('symbol')
-            price = data.get('price')
-            if symbol and price:
-                self.portfolio_manager.update_price(symbol, price)
-
         # Get relevant context from memory
         context = self.memory_manager.get_context(
             current_data=data,
@@ -390,7 +460,118 @@ Please analyze this situation and provide:
             self._execute_trading_decision(response, data)
 
         return response
-    
+
+    def _generate_alert_batch(self, batch_data: Dict[str, Any], trigger_info: Dict[str, Any]) -> str:
+        """
+        Generate LLM alert for triggered event with ALL stocks visible.
+
+        Args:
+            batch_data: Batch data containing all stocks
+            trigger_info: Information about what triggered the alert
+
+        Returns:
+            LLM response
+        """
+        stocks = batch_data.get('stocks', [])
+
+        # Get relevant context from memory
+        context = self.memory_manager.get_context(
+            current_data=batch_data,
+            max_tokens=2000
+        )
+
+        # Build alert prompt
+        trigger_type = trigger_info.get('type', 'unknown')
+        triggered_symbol = trigger_info.get('triggered_symbol', 'UNKNOWN')
+
+        # Format ALL stocks data
+        stocks_data_str = ""
+        for stock in stocks:
+            stocks_data_str += f"\n{stock['symbol']}:\n"
+            stocks_data_str += f"  Price: ${stock['price']:.2f}\n"
+            stocks_data_str += f"  Change: {stock['change']:+.2f}%\n"
+            stocks_data_str += f"  Volume: {stock['volume']:,}\n"
+
+        # Add portfolio context if trading is enabled
+        portfolio_context = ""
+        if self.enable_trading and self.portfolio_manager:
+            summary = self.portfolio_manager.get_summary()
+
+            portfolio_context = f"""
+Portfolio Status:
+- Cash Available: ${summary['cash']:.2f}
+- Total Portfolio Value: ${summary['total_value']:.2f}
+- Portfolio Return: {summary['total_return_pct']:.2f}%
+- Buy & Hold Return: {summary['buy_hold_return_pct']:.2f}%
+- Outperformance: {summary['outperformance']:.2f}%
+
+Current Positions:
+"""
+            for pos in summary['positions']:
+                if pos['shares'] > 0:
+                    portfolio_context += f"""
+{pos['symbol']}:
+  - Shares: {pos['shares']:.4f}
+  - Avg Cost: ${pos['avg_cost']:.2f}
+  - Current Price: ${pos['current_price']:.2f}
+  - Value: ${pos['value']:.2f}
+  - P/L: ${pos['profit_loss']:.2f} ({pos['profit_loss_pct']:.2f}%)
+"""
+
+        trading_instruction = ""
+        if self.enable_trading and self.portfolio_manager:
+            summary = self.portfolio_manager.get_summary()
+            trading_instruction = f"""
+TRADING DECISION REQUIRED:
+IMPORTANT: You have ${summary['cash']:.2f} cash available. DO NOT try to buy more than this amount!
+
+Based on your analysis of ALL stocks, make trading decisions. You can make multiple decisions.
+Respond with ONE OR MORE of the following:
+- BUY SYMBOL $X (e.g., "BUY AAPL $500") - X must be <= ${summary['cash']:.2f}
+- SELL SYMBOL $X (e.g., "SELL GOOGL $300") - Only sell stocks you own
+- HOLD (no action)
+
+Include your trading decisions at the END of your response, one per line starting with "DECISION:"
+Example:
+DECISION: BUY AAPL $500
+DECISION: SELL GOOGL $200
+DECISION: HOLD MSFT
+"""
+
+        prompt = f"""ALERT: {trigger_type.upper().replace('_', ' ')} DETECTED IN {triggered_symbol}
+
+Current Market Data (ALL STOCKS):
+{stocks_data_str}
+
+Trigger Details:
+{self._format_trigger_info(trigger_info)}
+
+Historical Context:
+{context}
+{portfolio_context}
+
+Please analyze this situation across ALL stocks and provide:
+1. What is happening and why it's significant
+2. How this affects the overall market/portfolio
+3. Recommended actions for each stock
+{trading_instruction}
+"""
+
+        # Get LLM response
+        response = self.llm_client.chat(
+            prompt,
+            system_prompt=self.prompt_manager.system_prompt,
+            maintain_history=True
+        )
+
+        # Execute trading decisions if enabled
+        if self.enable_trading and self.portfolio_manager:
+            # Parse multiple trading decisions from response
+            for stock in stocks:
+                self._execute_trading_decision(response, stock)
+
+        return response
+
     def _format_trigger_info(self, trigger_info: Dict[str, Any]) -> str:
         """Format trigger information for display."""
         lines = []
@@ -408,7 +589,8 @@ Please analyze this situation and provide:
             data: Current data point
         """
         # Look for DECISION: line in response
-        decision_match = re.search(r'DECISION:\s*(BUY|SELL|HOLD)\s*\$?(\d+)?', llm_response, re.IGNORECASE)
+        # Matches: "DECISION: BUY $500" or "DECISION: BUY AAPL $500" or "DECISION: HOLD"
+        decision_match = re.search(r'DECISION:\s*(BUY|SELL|HOLD)\s*(?:[A-Z]+\s*)?\$?(\d+(?:\.\d+)?)?', llm_response, re.IGNORECASE)
 
         if not decision_match:
             logger.debug("No trading decision found in LLM response")
@@ -422,10 +604,12 @@ Please analyze this situation and provide:
             return
 
         if not amount_str:
-            logger.warning(f"Trading decision {action} found but no amount specified")
-            return
+            # Default to $100 if no amount specified
+            logger.info(f"Trading decision {action} found but no amount specified, defaulting to $100")
+            amount = 100.0
+        else:
+            amount = float(amount_str)
 
-        amount = float(amount_str)
         symbol = data.get('symbol')
         price = data.get('price')
         timestamp = data.get('timestamp', '')

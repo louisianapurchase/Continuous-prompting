@@ -27,28 +27,31 @@ class OllamaClient:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         timeout: int = 30,
+        num_gpu: int = 0,
     ):
         """
         Initialize Ollama client.
-        
+
         Args:
             model: Name of the Ollama model to use
             base_url: Base URL for Ollama API
             temperature: Sampling temperature (0.0 to 1.0)
             max_tokens: Maximum tokens in response
             timeout: Request timeout in seconds
+            num_gpu: Number of GPU layers to use (0 for CPU only)
         """
         if ollama is None:
             raise ImportError(
                 "ollama-python package not installed. "
                 "Install with: pip install ollama-python"
             )
-        
+
         self.model = model
         self.base_url = base_url
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.num_gpu = num_gpu
         
         # Conversation history
         self.conversation_history: List[Dict[str, str]] = []
@@ -122,6 +125,9 @@ class OllamaClient:
                 options={
                     'temperature': self.temperature,
                     'num_predict': self.max_tokens,
+                    'num_gpu': self.num_gpu,
+                    'num_thread': 4,  # Limit CPU threads to avoid memory issues
+                    'num_ctx': 2048,  # Context window size - smaller = less VRAM usage
                 },
                 stream=stream,
             )
@@ -186,6 +192,9 @@ class OllamaClient:
                 options={
                     'temperature': self.temperature,
                     'num_predict': self.max_tokens,
+                    'num_gpu': self.num_gpu,
+                    'num_thread': 4,  # Limit CPU threads to avoid memory issues
+                    'num_ctx': 2048,  # Context window size - smaller = less VRAM usage
                 }
             )
             

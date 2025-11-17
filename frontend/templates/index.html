@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continuous Prompting - Real-Time Trading</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-running { background-color: #10b981; animation: pulse 2s infinite; }
+        .status-stopped { background-color: #ef4444; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 0.5rem 0;
+        }
+        .metric-label {
+            font-size: 0.875rem;
+            opacity: 0.9;
+        }
+        .stock-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .stock-row:last-child {
+            border-bottom: none;
+        }
+        .price-up { color: #10b981; }
+        .price-down { color: #ef4444; }
+        .response-box {
+            background: #f9fafb;
+            border-left: 4px solid #667eea;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- Header -->
+        <div class="card">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800">Continuous Prompting Framework</h1>
+                    <p class="text-gray-600 mt-2">Real-time LLM-driven trading simulation</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center">
+                        <span class="status-dot status-stopped" id="statusDot"></span>
+                        <span id="statusText" class="font-semibold">Stopped</span>
+                    </div>
+                    <button onclick="startSimulation()" id="startBtn" 
+                            class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-semibold">
+                        Start
+                    </button>
+                    <button onclick="stopSimulation()" id="stopBtn" 
+                            class="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg font-semibold" disabled>
+                        Stop
+                    </button>
+                    <button onclick="resetSimulation()" id="resetBtn"
+                            class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-semibold">
+                        Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="metric-card">
+                <div class="metric-label">Data Points</div>
+                <div class="metric-value" id="dataPoints">0</div>
+            </div>
+            <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                <div class="metric-label">LLM Responses</div>
+                <div class="metric-value" id="llmResponses">0</div>
+            </div>
+            <div class="metric-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                <div class="metric-label">Cash Available</div>
+                <div class="metric-value" id="cashAvailable">$0</div>
+            </div>
+            <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                <div class="metric-label">Portfolio Value</div>
+                <div class="metric-value" id="portfolioValue">$0</div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-2 gap-6">
+            <!-- Left Column: Live Data & Charts -->
+            <div>
+                <!-- Live Stock Prices -->
+                <div class="card">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Live Stock Prices</h2>
+                    <div id="stockPrices">
+                        <p class="text-gray-500 text-center py-8">Waiting for data...</p>
+                    </div>
+                </div>
+
+                <!-- Price Chart -->
+                <div class="card">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Price Movement</h2>
+                    <canvas id="priceChart" height="300"></canvas>
+                </div>
+            </div>
+
+            <!-- Right Column: LLM Responses & Portfolio -->
+            <div>
+                <!-- Portfolio Performance -->
+                <div class="card">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Portfolio Performance</h2>
+                    <div class="grid grid-cols-3 gap-4 mb-4">
+                        <div class="text-center">
+                            <div class="text-gray-600 text-sm">Total Trades</div>
+                            <div class="text-2xl font-bold" id="totalTrades">0</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-gray-600 text-sm">Winning Trades</div>
+                            <div class="text-2xl font-bold text-green-600" id="winningTrades">0</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-gray-600 text-sm">Win Rate</div>
+                            <div class="text-2xl font-bold" id="winRate">0%</div>
+                        </div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 rounded">
+                        <div class="text-gray-600 text-sm">Profit/Loss</div>
+                        <div class="text-3xl font-bold" id="profitLoss">$0.00</div>
+                        <div class="text-sm" id="profitLossPct">0.00%</div>
+                    </div>
+                </div>
+
+                <!-- LLM Responses -->
+                <div class="card" style="max-height: 600px; overflow-y: auto;">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">LLM Responses</h2>
+                    <div id="llmResponsesList">
+                        <p class="text-gray-500 text-center py-8">No responses yet...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let priceChart = null;
+        let chartData = { labels: [], datasets: [] };
+        let stockColors = {'AAPL': '#3b82f6', 'GOOGL': '#ef4444', 'MSFT': '#10b981', 'TSLA': '#f59e0b'};
+
+        function initChart() {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            priceChart = new Chart(ctx, {
+                type: 'line', data: chartData,
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Time' } },
+                        y: { display: true, title: { display: true, text: 'Price ($)' } }
+                    },
+                    plugins: { legend: { display: true, position: 'top' } }
+                }
+            });
+        }
+
+        async function startSimulation() {
+            const response = await fetch('/api/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+            if (response.ok) {
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('statusDot').className = 'status-dot status-running';
+                document.getElementById('statusText').textContent = 'Running';
+                connectEventSource();
+            }
+        }
+
+        async function stopSimulation() {
+            const response = await fetch('/api/stop', { method: 'POST' });
+            if (response.ok) {
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('statusDot').className = 'status-dot status-stopped';
+                document.getElementById('statusText').textContent = 'Stopped';
+                if (eventSource) { eventSource.close(); eventSource = null; }
+            }
+        }
+
+        async function resetSimulation() {
+            await fetch('/api/reset', { method: 'POST' });
+            location.reload();
+        }
+
+        function connectEventSource() {
+            eventSource = new EventSource('/stream');
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'data') { updateStockPrices(data.data); updateChart(data.data); }
+                else if (data.type === 'response') { addLLMResponse(data.data); }
+                else if (data.type === 'portfolio') { updatePortfolio(data.data); }
+            };
+        }
+
+        function updateStockPrices(batchData) {
+            const stocks = batchData.stocks || [];
+            let html = '';
+            stocks.forEach(stock => {
+                const changeClass = stock.change >= 0 ? 'price-up' : 'price-down';
+                const changeSymbol = stock.change >= 0 ? '+' : '';
+                html += `<div class="stock-row"><div><span class="font-bold text-lg">${stock.symbol}</span>
+                <span class="text-gray-500 text-sm ml-2">${new Date(stock.timestamp).toLocaleTimeString()}</span></div>
+                <div class="text-right"><div class="font-bold text-lg">$${stock.price.toFixed(2)}</div>
+                <div class="${changeClass} text-sm">${changeSymbol}${stock.change.toFixed(2)}%</div></div></div>`;
+            });
+            document.getElementById('stockPrices').innerHTML = html;
+            document.getElementById('dataPoints').textContent = parseInt(document.getElementById('dataPoints').textContent) + stocks.length;
+        }
+
+        function updateChart(batchData) {
+            const stocks = batchData.stocks || [];
+            const timestamp = new Date(batchData.timestamp).toLocaleTimeString();
+            chartData.labels.push(timestamp);
+            if (chartData.labels.length > 50) chartData.labels.shift();
+            stocks.forEach(stock => {
+                let dataset = chartData.datasets.find(d => d.label === stock.symbol);
+                if (!dataset) {
+                    dataset = {label: stock.symbol, data: [], borderColor: stockColors[stock.symbol] || '#999',
+                    backgroundColor: 'transparent', tension: 0.1};
+                    chartData.datasets.push(dataset);
+                }
+                dataset.data.push(stock.price);
+                if (dataset.data.length > 50) dataset.data.shift();
+            });
+            if (priceChart) priceChart.update('none');
+        }
+
+        function addLLMResponse(responseData) {
+            const container = document.getElementById('llmResponsesList');
+            if (container.querySelector('p')) container.innerHTML = '';
+            const responseDiv = document.createElement('div');
+            responseDiv.className = 'response-box mb-4';
+            const stocks = responseData.data.stocks || [];
+            const stockInfo = stocks.map(s => `${s.symbol}: $${s.price.toFixed(2)} (${s.change >= 0 ? '+' : ''}${s.change.toFixed(2)}%)`).join(' | ');
+            responseDiv.innerHTML = `<div class="text-xs text-gray-500 mb-2">${new Date(responseData.timestamp).toLocaleTimeString()} - ${stockInfo}</div>
+            <div class="text-sm">${responseData.response.replace(/\n/g, '<br>')}</div>`;
+            container.insertBefore(responseDiv, container.firstChild);
+            document.getElementById('llmResponses').textContent = parseInt(document.getElementById('llmResponses').textContent) + 1;
+        }
+
+        function updatePortfolio(summary) {
+            document.getElementById('cashAvailable').textContent = `$${summary.cash.toFixed(0)}`;
+            document.getElementById('portfolioValue').textContent = `$${summary.total_value.toFixed(0)}`;
+            document.getElementById('totalTrades').textContent = summary.total_trades;
+            document.getElementById('winningTrades').textContent = summary.winning_trades;
+            document.getElementById('winRate').textContent = `${summary.win_rate.toFixed(1)}%`;
+            const profitLoss = summary.total_value - summary.initial_value;
+            document.getElementById('profitLoss').textContent = `$${profitLoss.toFixed(2)}`;
+            document.getElementById('profitLossPct').textContent = `${profitLoss >= 0 ? '+' : ''}${summary.total_return_pct.toFixed(2)}%`;
+            document.getElementById('profitLoss').className = `text-3xl font-bold ${profitLoss >= 0 ? 'text-green-600' : 'text-red-600'}`;
+        }
+
+        window.onload = function() { initChart(); };
+    </script>
+</body>
+</html>

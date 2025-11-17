@@ -3,11 +3,12 @@
 # LLM Configuration
 llm:
   provider: "ollama"
-  model: "mistral"  # Options: mistral, llama2:7b, phi, tinyllama, etc.
+  model: "mistral"  # Using mistral (7B) - fits in RTX 4060 8GB VRAM
   base_url: "http://localhost:11434"
   temperature: 0.7
-  max_tokens: 2048
+  max_tokens: 512  # Reduced to avoid memory issues
   timeout: 30
+  num_gpu: 1  # Use GPU (RTX 4060)
 
 # Data Stream Configuration
 data:
@@ -20,7 +21,7 @@ data:
   # Sample data configuration
   sample:
     symbols: ["AAPL", "GOOGL", "MSFT", "TSLA"]
-    price_volatility: 0.02  # 2% price movement range
+    price_volatility: 0.001  # 0.1% price movement range (realistic for 1-second intervals)
     volume_range: [1000, 10000]
 
   # News injection configuration
@@ -30,8 +31,8 @@ data:
 
 # Portfolio Trading Configuration
 trading:
-  enabled: true                  # Enable/disable portfolio trading
-  initial_cash_per_symbol: 1000  # Starting cash allocation per stock ($1000 default)
+  enabled: true                # Enable/disable portfolio trading
+  initial_cash_per_symbol: 1000  # Starting cash per stock symbol ($1000 per stock = $4000 total for 4 stocks)
 
 # Prompting Strategy Configuration
 strategy:
@@ -54,21 +55,13 @@ strategy:
         interval: 10     # seconds
 
   # Reactive strategy settings (RECOMMENDED)
-  # LLM sees all data but only responds when something important happens
+  # LLM sees all data and decides when to respond
   reactive:
     check_interval: 1        # Check triggers every N data points
-    alert_cooldown: 60       # Minimum seconds between alerts for same symbol
+    alert_cooldown: 0        # No cooldown - LLM decides when to respond
     triggers:
-      - type: "price_change"
-        threshold: 0.03      # 3% price change triggers alert
-      - type: "volume_spike"
-        threshold: 2.5       # 2.5x average volume triggers alert
-      - type: "news_event"   # Any news event triggers alert
-      - type: "pattern"
-        pattern_type: "consecutive_moves"
-        count: 3             # 3 consecutive moves in same direction
       - type: "time_interval"
-        interval: 300        # Periodic check-in every 300 data points (~5 min)
+        interval: 1          # Send EVERY data point to LLM (let LLM decide when to respond)
 
 # Memory Management Configuration
 memory:

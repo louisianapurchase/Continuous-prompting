@@ -38,16 +38,16 @@ class SampleDataSource(DataSource):
     def __init__(
         self,
         symbols: List[str] = None,
-        price_volatility: float = 0.02,
+        price_volatility: float = 0.0001,
         volume_range: tuple = (1000, 10000),
         max_points: Optional[int] = None,
     ):
         """
         Initialize sample data source.
-        
+
         Args:
             symbols: List of stock symbols to generate data for
-            price_volatility: Maximum price change percentage per update
+            price_volatility: Maximum price change percentage per update (default: 0.0001 = 0.01%)
             volume_range: Tuple of (min, max) volume
             max_points: Maximum number of data points to generate (None for infinite)
         """
@@ -55,10 +55,17 @@ class SampleDataSource(DataSource):
         self.price_volatility = price_volatility
         self.volume_range = volume_range
         self.max_points = max_points
-        
-        # Initialize prices for each symbol
+
+        # Initialize prices for each symbol with FIXED realistic starting prices
+        # This prevents massive jumps when simulator restarts
+        fixed_prices = {
+            "AAPL": 150.00,
+            "GOOGL": 2800.00,
+            "MSFT": 380.00,
+            "TSLA": 250.00,
+        }
         self.current_prices = {
-            symbol: random.uniform(100, 500) for symbol in self.symbols
+            symbol: fixed_prices.get(symbol, 150.00) for symbol in self.symbols
         }
         
         self.start_time = datetime.now()
@@ -69,39 +76,46 @@ class SampleDataSource(DataSource):
         )
     
     def get_next(self) -> Optional[Dict[str, Any]]:
-        """Generate next sample data point."""
+        """Generate next sample data point - returns data for ALL symbols at once."""
         if self.max_points and self.current_index >= self.max_points:
             return None
-        
-        # Pick a random symbol
-        symbol = random.choice(self.symbols)
-        
-        # Update price with random walk
-        current_price = self.current_prices[symbol]
-        price_change = random.uniform(
-            -self.price_volatility, self.price_volatility
-        )
-        new_price = current_price * (1 + price_change)
-        self.current_prices[symbol] = new_price
-        
-        # Generate volume
-        volume = random.randint(*self.volume_range)
-        
+
         # Calculate timestamp
         timestamp = self.start_time + timedelta(seconds=self.current_index)
-        
-        data_point = {
-            'timestamp': timestamp.isoformat(),
-            'symbol': symbol,
-            'price': round(new_price, 2),
-            'volume': volume,
-            'change': round(price_change * 100, 2),  # percentage
-            'high': round(new_price * 1.001, 2),
-            'low': round(new_price * 0.999, 2),
-        }
-        
+
+        # Generate data for ALL symbols
+        stocks_data = []
+        for symbol in self.symbols:
+            # Update price with random walk
+            current_price = self.current_prices[symbol]
+            price_change = random.uniform(
+                -self.price_volatility, self.price_volatility
+            )
+            new_price = current_price * (1 + price_change)
+            self.current_prices[symbol] = new_price
+
+            # Generate volume
+            volume = random.randint(*self.volume_range)
+
+            stock_data = {
+                'timestamp': timestamp.isoformat(),
+                'symbol': symbol,
+                'price': round(new_price, 2),
+                'volume': volume,
+                'change': round(price_change * 100, 2),  # percentage
+                'high': round(new_price * 1.001, 2),
+                'low': round(new_price * 0.999, 2),
+            }
+            stocks_data.append(stock_data)
+
         self.current_index += 1
-        return data_point
+
+        # Return a batch containing all stocks
+        return {
+            'type': 'batch',
+            'timestamp': timestamp.isoformat(),
+            'stocks': stocks_data
+        }
     
     def reset(self) -> None:
         """Reset to initial state."""

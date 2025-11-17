@@ -91,40 +91,40 @@ class Position:
 class PortfolioManager:
     """
     Manages a virtual trading portfolio.
-    
-    Each stock starts with $1000 allocated. The LLM can make buy/sell decisions.
+
+    Starts with total cash allocated across all stocks. The LLM can make buy/sell decisions.
     Tracks performance vs buy-and-hold strategy.
     """
-    
+
     def __init__(self, symbols: List[str], initial_cash_per_symbol: float = 1000.0):
         """
         Initialize portfolio.
-        
+
         Args:
             symbols: List of stock symbols to track
-            initial_cash_per_symbol: Starting cash allocation per symbol (default: $1000)
+            initial_cash_per_symbol: Starting cash per stock symbol (default: $1000 per stock)
         """
         self.symbols = symbols
         self.initial_cash_per_symbol = initial_cash_per_symbol
         self.total_initial_cash = initial_cash_per_symbol * len(symbols)
-        
+
         # Current state
         self.cash = self.total_initial_cash
         self.positions: Dict[str, Position] = {symbol: Position(symbol) for symbol in symbols}
         self.trades: List[Trade] = []
-        
+
         # Track initial prices for buy-and-hold comparison
         self.initial_prices: Dict[str, float] = {}
         self.buy_and_hold_shares: Dict[str, float] = {}
-        
+
         # Current prices
         self.current_prices: Dict[str, float] = {}
-        
+
         # Performance tracking
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
-    
+
     def initialize_buy_and_hold(self, symbol: str, price: float):
         """
         Initialize buy-and-hold strategy for a symbol.
@@ -132,7 +132,7 @@ class PortfolioManager:
         """
         if symbol not in self.initial_prices:
             self.initial_prices[symbol] = price
-            # Buy-and-hold: invest $1000 at initial price
+            # Buy-and-hold: invest equal portion of initial cash at initial price
             self.buy_and_hold_shares[symbol] = self.initial_cash_per_symbol / price
             logger.info(f"Buy-and-hold initialized for {symbol}: {self.buy_and_hold_shares[symbol]:.4f} shares @ ${price:.2f}")
     
@@ -235,6 +235,11 @@ class PortfolioManager:
     
     def get_buy_and_hold_value(self) -> float:
         """Get value of buy-and-hold strategy."""
+        # Only calculate if all symbols have been initialized
+        if len(self.buy_and_hold_shares) < len(self.symbols):
+            # Not all symbols initialized yet, return initial cash
+            return self.total_initial_cash
+
         return sum(
             self.buy_and_hold_shares.get(symbol, 0) * self.current_prices.get(symbol, 0)
             for symbol in self.symbols

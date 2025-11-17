@@ -214,6 +214,7 @@ def main():
             base_url=llm_config.get('base_url', 'http://localhost:11434'),
             temperature=llm_config.get('temperature', 0.7),
             max_tokens=llm_config.get('max_tokens', 2048),
+            num_gpu=llm_config.get('num_gpu', 0),
         )
         
         # Create prompt manager
@@ -230,11 +231,13 @@ def main():
         if trading_config.get('enabled', True):
             sample_config = config['data'].get('sample', {})
             symbols = sample_config.get('symbols', ['AAPL', 'GOOGL', 'MSFT', 'TSLA'])
+            initial_cash_per_symbol = trading_config.get('initial_cash_per_symbol', 1000.0)
             portfolio_manager = PortfolioManager(
                 symbols=symbols,
-                initial_cash_per_symbol=trading_config.get('initial_cash_per_symbol', 1000.0)
+                initial_cash_per_symbol=initial_cash_per_symbol
             )
-            logger.info(f"Portfolio trading enabled: ${trading_config.get('initial_cash_per_symbol', 1000.0)} per symbol")
+            total_cash = initial_cash_per_symbol * len(symbols)
+            logger.info(f"Portfolio trading enabled: ${initial_cash_per_symbol:.2f} per stock (${total_cash:.2f} total)")
 
         # Create strategy
         strategy = create_strategy(config, llm_client, prompt_manager, portfolio_manager)

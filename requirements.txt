@@ -20,8 +20,7 @@ chromadb>=0.4.0
 sentence-transformers>=2.2.0
 
 # Web Interface
-streamlit>=1.28.0
-plotly>=5.17.0
+flask>=3.0.0
 
 # Optional: For future API data sources
 # yfinance>=0.2.0
