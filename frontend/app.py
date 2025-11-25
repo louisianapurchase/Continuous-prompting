@@ -14,6 +14,7 @@ import yaml
 from datetime import datetime
 from queue import Queue
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, Response, jsonify, request
 
 # Add parent directory to path to import src modules
@@ -42,6 +43,7 @@ portfolio_manager = None
 strategy = None
 data_history = []
 response_history = []
+executor = ThreadPoolExecutor(max_workers=2)  # For async LLM processing
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -56,7 +58,7 @@ config = load_config()
 def create_components(settings):
     """Create all necessary components based on settings."""
     global portfolio_manager, strategy
-    
+
     # Create data source
     if settings['data_source'] == 'sample':
         data_source = SampleDataSource(
@@ -65,7 +67,7 @@ def create_components(settings):
         )
     else:
         data_source = CSVDataSource(settings['csv_path'])
-    
+
     # Create news generator
     news_generator = None
     if settings.get('enable_news', True):
@@ -73,14 +75,14 @@ def create_components(settings):
             symbols=settings['symbols'],
             events_per_day=settings.get('news_events_per_day', 1.5)
         )
-    
+
     # Create simulator
     simulator = TradingDataSimulator(
         data_source=data_source,
         update_interval=settings['update_interval'],
         news_generator=news_generator,
     )
-    
+
     # Create LLM client
     llm_client = OllamaClient(
         model=settings['model'],
@@ -88,12 +90,12 @@ def create_components(settings):
         max_tokens=settings['max_tokens'],
         num_gpu=config['llm'].get('num_gpu', 0),
     )
-    
+
     # Create prompt manager
     prompt_manager = PromptManager(
-        system_prompt=settings.get('system_prompt', 'You are a financial trading assistant.'),
+        system_prompt=config['prompts']['system_prompt'],
     )
-    
+
     # Create memory manager
     memory_type = settings.get('memory_type', 'sliding_window')
     if memory_type == 'chromadb':
@@ -104,13 +106,14 @@ def create_components(settings):
         memory_manager = SlidingWindowMemoryManager(memory_config)
     else:
         memory_manager = None
-    
-    # Create portfolio manager
+
+    # Create portfolio manager (use global)
     if settings.get('enable_trading', True):
         portfolio_manager = PortfolioManager(
             symbols=settings['symbols'],
             initial_cash_per_symbol=settings.get('initial_cash_per_symbol', 1000.0)
         )
+        logger.info(f"Portfolio initialized with ${portfolio_manager.cash:.2f} cash")
     
     # Create strategy
     strategy_type = settings['strategy']
@@ -142,59 +145,90 @@ def create_components(settings):
 def process_stream(simulator, strategy):
     """Process data stream and send events to clients."""
     global is_running, data_history, response_history
-    
+
     try:
         for data_point in simulator.stream():
             if not is_running:
+                logger.info("Stream stopped by user")
                 break
-            
-            # Handle batch data
-            if data_point.get('type') == 'batch':
-                stocks = data_point.get('stocks', [])
-                
-                # Add to history
-                for stock_data in stocks:
-                    data_history.append(stock_data)
-                    if len(data_history) > 400:
-                        data_history.pop(0)
 
-                # Send data update to clients
-                event_queue.put({
-                    'type': 'data',
-                    'data': data_point
-                })
+            try:
+                # Handle batch data
+                if data_point.get('type') == 'batch':
+                    stocks = data_point.get('stocks', [])
 
-                # Process with strategy (async in background)
-                response = strategy.process_data_point(data_point)
-                if response:
-                    response_entry = {
-                        'timestamp': datetime.now().isoformat(),
-                        'data': data_point,
-                        'response': response,
-                    }
-                    response_history.append(response_entry)
+                    # Update portfolio prices
+                    if portfolio_manager:
+                        for stock_data in stocks:
+                            portfolio_manager.update_price(
+                                stock_data.get('symbol'),
+                                stock_data.get('price')
+                            )
 
-                    # Send response to clients
+                    # Add to history
+                    for stock_data in stocks:
+                        data_history.append(stock_data)
+                        if len(data_history) > 400:
+                            data_history.pop(0)
+
+                    # Send data update to clients
                     event_queue.put({
-                        'type': 'response',
-                        'data': response_entry
+                        'type': 'data',
+                        'data': data_point
                     })
 
-                # Send portfolio update
-                if portfolio_manager:
-                    summary = portfolio_manager.get_summary()
-                    event_queue.put({
-                        'type': 'portfolio',
-                        'data': summary
-                    })
+                    # Process with strategy (async in background - don't block stream!)
+                    def process_strategy_async(data_pt):
+                        """Process strategy in background thread."""
+                        try:
+                            response = strategy.process_data_point(data_pt)
+                            if response:
+                                response_entry = {
+                                    'timestamp': datetime.now().isoformat(),
+                                    'data': data_pt,
+                                    'response': response,
+                                }
+                                response_history.append(response_entry)
+
+                                # Send response to clients
+                                event_queue.put({
+                                    'type': 'response',
+                                    'data': response_entry
+                                })
+                        except Exception as e:
+                            logger.error(f"Error processing strategy: {e}", exc_info=True)
+
+                    # Submit to thread pool - don't wait for result
+                    executor.submit(process_strategy_async, data_point)
+
+                    # Send portfolio update
+                    if portfolio_manager:
+                        try:
+                            summary = portfolio_manager.get_summary()
+
+                            # Debug logging
+                            if summary['total_trades'] > 0:
+                                logger.info(f"Portfolio: Cash=${summary['cash']:.2f}, Value=${summary['total_value']:.2f}, Positions={len(summary['positions'])}")
+
+                            event_queue.put({
+                                'type': 'portfolio',
+                                'data': summary
+                            })
+                        except Exception as e:
+                            logger.error(f"Error getting portfolio summary: {e}", exc_info=True)
+
+            except Exception as e:
+                logger.error(f"Error processing data point: {e}", exc_info=True)
+                continue
 
     except Exception as e:
-        logger.error(f"Error in stream processing: {e}")
+        logger.error(f"Fatal error in stream processing: {e}", exc_info=True)
         event_queue.put({
             'type': 'error',
             'data': str(e)
         })
     finally:
+        logger.info("Stream processing ended")
         is_running = False
 
 
@@ -288,16 +322,26 @@ def get_portfolio():
 def stream():
     """Server-Sent Events stream for real-time updates."""
     def event_stream():
-        while True:
-            if not event_queue.empty():
-                event = event_queue.get()
-                yield f"data: {json.dumps(event)}\n\n"
-            else:
-                # Send heartbeat every 5 seconds
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-                time.sleep(5)
+        try:
+            while True:
+                try:
+                    if not event_queue.empty():
+                        event = event_queue.get(timeout=0.1)
+                        yield f"data: {json.dumps(event)}\n\n"
+                    else:
+                        # Send heartbeat to keep connection alive
+                        time.sleep(0.5)
+                        yield f": heartbeat\n\n"
+                except Exception as e:
+                    logger.error(f"Error in event stream: {e}")
+                    break
+        except GeneratorExit:
+            logger.info("Client disconnected from stream")
 
-    return Response(event_stream(), mimetype='text/event-stream')
+    return Response(event_stream(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
 
 
 if __name__ == '__main__':

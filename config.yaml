@@ -12,7 +12,7 @@ llm:
 
 # Data Stream Configuration
 data:
-  update_interval: 1.0  # seconds between data updates
+  update_interval: 0.5  # seconds between data updates (faster for real-time feel)
   source: "sample"      # Options: sample, csv, random
 
   # For CSV source
@@ -55,13 +55,18 @@ strategy:
         interval: 10     # seconds
 
   # Reactive strategy settings (RECOMMENDED)
-  # LLM sees all data and decides when to respond
+  # LLM only responds when significant events occur
   reactive:
     check_interval: 1        # Check triggers every N data points
-    alert_cooldown: 0        # No cooldown - LLM decides when to respond
+    alert_cooldown: 30       # Minimum 30 seconds between responses
     triggers:
+      - type: "price_change"
+        threshold: 0.015     # 1.5% price change triggers response
+      - type: "volume_spike"
+        threshold: 1.5       # 1.5x average volume triggers response
+      - type: "news_event"   # News events always trigger response
       - type: "time_interval"
-        interval: 1          # Send EVERY data point to LLM (let LLM decide when to respond)
+        interval: 60         # Check in every 60 data points (~30 seconds at 0.5s intervals)
 
 # Memory Management Configuration
 memory:
@@ -84,9 +89,14 @@ memory:
 # Prompt Templates
 prompts:
   system_prompt: |
-    You are a trading data analyst. You receive streaming market data in real-time.
-    Your role is to observe patterns, identify significant events, and provide insights
-    when appropriate. Be concise and focus on actionable observations.
+    You are an expert trading analyst monitoring real-time market data.
+
+    IMPORTANT GUIDELINES:
+    - Only respond when you see significant patterns, opportunities, or risks
+    - Be concise and actionable - focus on what matters
+    - When trading is enabled, make clear BUY/SELL/HOLD decisions with reasoning
+    - Consider the entire portfolio, not just individual stocks
+    - Don't respond to normal market noise - only meaningful events
   
   continuous_prompt: |
     New market data:

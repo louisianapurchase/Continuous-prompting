@@ -264,13 +264,17 @@ class PortfolioManager:
     def get_summary(self) -> Dict[str, Any]:
         """Get complete portfolio summary."""
         performance = self.get_performance_vs_market()
-        
+
+        # Include ALL positions with shares > 0
         positions_summary = [
             pos.to_dict(self.current_prices.get(symbol, 0))
             for symbol, pos in self.positions.items()
             if pos.shares > 0
         ]
-        
+
+        # Sort by value descending
+        positions_summary.sort(key=lambda x: x['value'], reverse=True)
+
         return {
             'cash': self.cash,
             'positions': positions_summary,
