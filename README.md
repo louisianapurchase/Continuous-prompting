@@ -2,20 +2,29 @@
 
 An experimental framework for exploring continuous LLM prompting with streaming data. This project investigates methods for effectively prompting Large Language Models with continuously streaming trading data, addressing the core challenge of maintaining context and memory across thousands of data points.
 
-## Recent Updates (November 2025)
+## Recent Updates (December 2025)
 
-**Major Frontend Overhaul:**
+**Latest Updates (December 2):**
+- **Real stock data support** - Download and use actual historical intraday data from Yahoo Finance
+- **Fixed portfolio tracking** - Positions now display correctly with accurate P/L calculations
+- **Improved LLM context** - Portfolio status now appears at the TOP of prompts (critical info first)
+- **Better percentage tracking** - Live prices show total change from start, not just recent change
+- **Cleaner codebase** - Removed all legacy strategy code (continuous, event-driven)
+- **Enhanced trading prompts** - Clear rules about what stocks can be bought/sold/held
+- **1-minute interval data** - Download script configured for realistic 1-minute trading data
+
+**Major Frontend Overhaul (November):**
 - **Replaced Streamlit with Flask** - No more page reloads!
 - **Real-time updates via Server-Sent Events (SSE)** - True live streaming
 - **Modern UI with Tailwind CSS** - Clean, professional design
 - **Live-updating charts with Chart.js** - Smooth animations, no flickering
 - **Portfolio tracking** - Virtual trading with LLM-driven decisions
 - **Batch data processing** - LLM sees all 4 stocks simultaneously
-- **Reactive strategy improvements** - LLM decides when to respond (no artificial thresholds)
+- **Reactive strategy improvements** - LLM only responds to significant events
 - **Fixed price volatility** - Realistic 0.1% changes per second
 - **Persistent portfolio** - No more resets on page reload
 
-**Why the change?**
+**Why Flask?**
 Streamlit's constant page reloads were frustrating and inefficient. The new Flask interface provides true real-time updates without any page refreshes, making the experience much smoother and more professional.
 
 ## Table of Contents
@@ -58,18 +67,19 @@ We've implemented two memory management strategies to address these challenges:
 
 ### Key Features
 
-- Real-time data streaming simulation
-- News event injection (1-2 generated news events per day)
-- Multiple prompting strategies (reactive, continuous, event-driven)
-- Reactive strategy: LLM only responds to important events (RECOMMENDED)
-- Built-in memory management (vector DB + sliding window)
-- Ollama LLM integration (local, private, free)
-- **Modern Flask web interface with real-time updates (no page reloads!)**
-- Live-updating charts with Chart.js
-- Server-Sent Events (SSE) for true real-time streaming
-- Portfolio tracking with LLM-driven trading decisions
-- CLI interface for terminal-based experiments
-- Configurable prompts, parameters, and triggers
+- **Real stock data support** - Download actual historical intraday data from Yahoo Finance (1-minute intervals)
+- **Simulated data option** - Realistic random walk price generation for testing
+- **Real-time data streaming** - Stream data at configurable intervals (default: 0.5 seconds)
+- **News event injection** - Simulated news events (1-2 per day)
+- **Reactive strategy** - LLM only responds to significant events (RECOMMENDED)
+- **Built-in memory management** - Vector DB + sliding window for context retrieval
+- **Ollama LLM integration** - Local, private, free (supports GPU acceleration)
+- **Modern Flask web interface** - Real-time updates via Server-Sent Events (no page reloads!)
+- **Live-updating charts** - Chart.js with tabbed interface for each stock
+- **Portfolio tracking** - Virtual trading with LLM-driven BUY/SELL/HOLD decisions
+- **Accurate P/L tracking** - Real-time profit/loss calculations with position details
+- **CLI interface** - Terminal-based experiments for headless environments
+- **Configurable everything** - Prompts, parameters, triggers, data sources
 
 ## Installation
 
@@ -120,10 +130,10 @@ pip install chromadb sentence-transformers
 
 ## Quick Start
 
-### Web Interface (Recommended)
+### Option 1: Web Interface with Simulated Data (Fastest)
 
 ```bash
-python frontend/app.py
+python run_flask.py
 ```
 
 Open your browser to `http://localhost:5000`
@@ -140,6 +150,30 @@ Open your browser to `http://localhost:5000`
 3. See LLM responses appear in real-time
 4. Monitor portfolio performance
 5. Click "Stop" when done
+
+### Option 2: Web Interface with Real Stock Data (Recommended)
+
+**Step 1: Download real data**
+```bash
+pip install yfinance
+python scripts/download_real_data.py
+```
+
+This downloads 1-minute interval data for AAPL, GOOGL, MSFT, TSLA from Yahoo Finance (last trading day, ~390 data points per stock).
+
+**Step 2: Update config.yaml**
+```yaml
+data:
+  source: "csv"  # Change from "sample"
+  csv_path: "data/raw/real_trading_data_1m_1d.csv"
+```
+
+**Step 3: Run the app**
+```bash
+python run_flask.py
+```
+
+Now you'll see **real historical stock data** playing back! See [REAL_DATA_SETUP.md](REAL_DATA_SETUP.md) for full details.
 
 **Why Flask instead of Streamlit?**
 - **No page reloads** - True real-time updates via Server-Sent Events
@@ -237,16 +271,21 @@ continuous-prompting/
 
 ### How Data Flows Through the System
 
-1. **Data Generation**
-   - `SampleDataSource` generates realistic trading data
-   - Simulates 4 stocks: AAPL, GOOGL, MSFT, TSLA
-   - Each data point includes: symbol, price, change percentage, volume, timestamp
-   - Prices fluctuate based on configurable volatility
+1. **Data Source** (Choose one)
+   - **Real Data**: `CSVDataSource` loads historical intraday data from Yahoo Finance
+     - Download with `python scripts/download_real_data.py`
+     - 1-minute interval data for AAPL, GOOGL, MSFT, TSLA
+     - Actual historical prices, volumes, and movements
+   - **Simulated Data**: `SampleDataSource` generates realistic trading data
+     - Random walk price simulation with 0.1% volatility
+     - Configurable starting prices and volume ranges
+     - Infinite data stream for testing
 
 2. **Data Streaming**
    - `DataSimulator` orchestrates the stream
-   - Yields one data point per interval (default: 1 second)
+   - Yields batches of all 4 stocks per interval (default: 0.5 seconds)
    - Runs in background thread for non-blocking operation
+   - Each batch includes: timestamp, symbol, price, change %, volume, high, low
 
 3. **Strategy Processing**
    - Strategy receives each data point
@@ -490,75 +529,18 @@ Please analyze this situation and provide:
 3. Recommended action or monitoring focus
 ```
 
-### 2. Continuous Strategy
+### 2. Legacy Strategies (Removed)
 
-**How it works:**
-- Processes every data point (or batches of data points)
-- Retrieves relevant context from memory manager
-- Builds prompt with current data + context
-- Sends to LLM with conversation history enabled
-- Never misses any data
+**Note:** The continuous and event-driven strategies have been removed to simplify the codebase. The reactive strategy is the only supported strategy and is recommended for all use cases.
 
-**Configuration:**
-```yaml
-strategy:
-  type: "continuous"
-  continuous:
-    batch_size: 1  # Process every data point (1) or batch multiple (5, 10, etc.)
-```
+**Why reactive only?**
+- More practical for real-world use
+- Better token efficiency
+- Cleaner codebase to maintain
+- Easier to understand and modify
+- Handles all use cases effectively
 
-**Use cases:**
-- When you need analysis of every data point
-- High-frequency trading scenarios
-- Pattern detection across all data
-- Comprehensive market analysis
-
-**Token usage:** High (every data point triggers LLM call)
-
-**Code flow:**
-```python
-# Simplified
-def process_data_point(data):
-    # Add to batch
-    batch.append(data)
-
-    # When batch is full
-    if len(batch) >= batch_size:
-        # Get relevant context from memory
-        context = memory_manager.get_context(data, max_tokens=2000)
-
-        # Build prompt
-        prompt = f"Context: {context}\nCurrent: {batch}\nAnalysis?"
-
-        # Send to LLM (maintains conversation history)
-        response = llm.chat(prompt, maintain_history=True)
-
-        # Store in memory
-        memory_manager.add_data_point(data, response)
-
-        return response
-```
-
-### 3. Event-Driven Strategy
-
-**How it works:**
-- Only prompts LLM when significant events occur
-- Configurable triggers: price changes, volume spikes, time intervals
-- More selective, lower token usage
-- May miss gradual patterns
-
-**Note:** Similar to reactive strategy but simpler. Reactive strategy is recommended for most use cases.
-
-**Configuration:**
-```yaml
-strategy:
-  type: "event_driven"
-  event_driven:
-    triggers:
-      - type: "price_change"
-        threshold: 0.02      # 2% price change
-      - type: "volume_spike"
-        threshold: 2.0       # 2x average volume
+If you need continuous processing, you can modify the reactive strategy's triggers to fire on every data point
       - type: "time_interval"
         seconds: 60          # Every 60 seconds
 ```

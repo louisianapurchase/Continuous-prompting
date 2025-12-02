@@ -1,12 +1,10 @@
 """Prompting strategy modules."""
 
 from .base_strategy import BaseStrategy
-from .continuous_strategy import ContinuousStrategy
-from .event_driven_strategy import EventDrivenStrategy
+from .reactive_strategy import ReactiveStrategy
 
 __all__ = [
     "BaseStrategy",
-    "ContinuousStrategy",
-    "EventDrivenStrategy",
+    "ReactiveStrategy",
 ]
 

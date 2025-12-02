@@ -521,24 +521,62 @@ Current Positions:
         trading_instruction = ""
         if self.enable_trading and self.portfolio_manager:
             summary = self.portfolio_manager.get_summary()
+
+            # List stocks we currently own
+            owned_stocks = [pos['symbol'] for pos in summary['positions'] if pos['shares'] > 0]
+            owned_str = ", ".join(owned_stocks) if owned_stocks else "None"
+
+            # Build detailed position info
+            position_details = ""
+            if owned_stocks:
+                position_details = "\n\nCURRENT POSITIONS (STOCKS YOU OWN):"
+                for pos in summary['positions']:
+                    if pos['shares'] > 0:
+                        position_details += f"\n  • {pos['symbol']}: {pos['shares']:.4f} shares @ ${pos['avg_cost']:.2f} avg cost (Current: ${pos['current_price']:.2f}, P/L: ${pos['profit_loss']:.2f})"
+            else:
+                position_details = "\n\nCURRENT POSITIONS: None (you don't own any stocks yet)"
+
             trading_instruction = f"""
-TRADING DECISION REQUIRED:
-IMPORTANT: You have ${summary['cash']:.2f} cash available. DO NOT try to buy more than this amount!
+═══════════════════════════════════════════════════════════════
+CRITICAL: READ THIS FIRST - PORTFOLIO STATUS
+═══════════════════════════════════════════════════════════════
 
-Based on your analysis of ALL stocks, make trading decisions. You can make multiple decisions.
-Respond with ONE OR MORE of the following:
-- BUY SYMBOL $X (e.g., "BUY AAPL $500") - X must be <= ${summary['cash']:.2f}
-- SELL SYMBOL $X (e.g., "SELL GOOGL $300") - Only sell stocks you own
-- HOLD (no action)
+CASH AVAILABLE: ${summary['cash']:.2f}
+TOTAL PORTFOLIO VALUE: ${summary['total_value']:.2f}
+{position_details}
 
-Include your trading decisions at the END of your response, one per line starting with "DECISION:"
-Example:
-DECISION: BUY AAPL $500
-DECISION: SELL GOOGL $200
-DECISION: HOLD MSFT
+═══════════════════════════════════════════════════════════════
+TRADING RULES (MUST FOLLOW):
+═══════════════════════════════════════════════════════════════
+
+YOU CAN BUY: Any stock, but ONLY if you have cash available
+   - Available cash: ${summary['cash']:.2f}
+   - If cash is $0.00, you CANNOT buy anything!
+
+YOU CAN SELL: ONLY stocks you currently own
+   - Stocks you own: {owned_str}
+   - If you don't own a stock, you CANNOT sell it!
+
+YOU CAN HOLD: ONLY stocks you currently own
+   - Don't say "HOLD AAPL" if you don't own AAPL!
+
+DECISION FORMAT:
+DECISION: BUY AAPL $500      (Buy $500 worth of AAPL - only if cash >= $500)
+DECISION: SELL MSFT $200     (Sell $200 worth of MSFT - only if you own MSFT)
+DECISION: HOLD GOOGL         (Keep holding GOOGL - only if you own GOOGL)
+
+COMMON MISTAKES TO AVOID:
+- DON'T try to buy if cash is $0.00
+- DON'T say HOLD for stocks you don't own
+- DON'T try to sell stocks you don't own
+- DON'T exceed available cash with BUY orders
+
+═══════════════════════════════════════════════════════════════
 """
 
-        prompt = f"""ALERT: {trigger_type.upper().replace('_', ' ')} DETECTED IN {triggered_symbol}
+        prompt = f"""{trading_instruction}
+
+ALERT: {trigger_type.upper().replace('_', ' ')} DETECTED IN {triggered_symbol}
 
 Current Market Data (ALL STOCKS):
 {stocks_data_str}
@@ -546,15 +584,15 @@ Current Market Data (ALL STOCKS):
 Trigger Details:
 {self._format_trigger_info(trigger_info)}
 
+{portfolio_context}
+
 Historical Context:
 {context}
-{portfolio_context}
 
 Please analyze this situation across ALL stocks and provide:
 1. What is happening and why it's significant
 2. How this affects the overall market/portfolio
 3. Recommended actions for each stock
-{trading_instruction}
 """
 
         # Get LLM response
@@ -566,9 +604,8 @@ Please analyze this situation across ALL stocks and provide:
 
         # Execute trading decisions if enabled
         if self.enable_trading and self.portfolio_manager:
-            # Parse multiple trading decisions from response
-            for stock in stocks:
-                self._execute_trading_decision(response, stock)
+            # Parse ALL trading decisions from response (not per stock)
+            self._execute_all_trading_decisions(response, stocks)
 
         return response
 
@@ -580,57 +617,69 @@ Please analyze this situation across ALL stocks and provide:
                 lines.append(f"  {key}: {value}")
         return '\n'.join(lines) if lines else "  No additional details"
 
-    def _execute_trading_decision(self, llm_response: str, data: Dict[str, Any]) -> None:
+    def _execute_all_trading_decisions(self, llm_response: str, stocks: List[Dict[str, Any]]) -> None:
         """
-        Parse LLM response for trading decision and execute it.
+        Parse ALL trading decisions from LLM response and execute them.
 
         Args:
             llm_response: LLM's response text
-            data: Current data point
+            stocks: List of current stock data
         """
-        # Look for DECISION: line in response
-        # Matches: "DECISION: BUY $500" or "DECISION: BUY AAPL $500" or "DECISION: HOLD"
-        decision_match = re.search(r'DECISION:\s*(BUY|SELL|HOLD)\s*(?:[A-Z]+\s*)?\$?(\d+(?:\.\d+)?)?', llm_response, re.IGNORECASE)
+        # Create a lookup for current prices
+        stock_prices = {stock['symbol']: stock for stock in stocks}
 
-        if not decision_match:
-            logger.debug("No trading decision found in LLM response")
+        # Find all DECISION: lines in the response
+        # Matches: "DECISION: BUY AAPL $500" or "DECISION: SELL GOOGL $300" or "DECISION: HOLD MSFT"
+        decision_pattern = r'DECISION:\s*(BUY|SELL|HOLD)\s+([A-Z]+)\s*\$?(\d+(?:\.\d+)?)?'
+        decisions = re.findall(decision_pattern, llm_response, re.IGNORECASE)
+
+        if not decisions:
+            logger.debug("No trading decisions found in LLM response")
             return
 
-        action = decision_match.group(1).upper()
-        amount_str = decision_match.group(2)
+        logger.info(f"Found {len(decisions)} trading decision(s) in LLM response")
 
-        if action == 'HOLD':
-            logger.info(f"Trading decision: HOLD {data.get('symbol')}")
-            return
+        for action, symbol, amount_str in decisions:
+            action = action.upper()
+            symbol = symbol.upper()
 
-        if not amount_str:
-            # Default to $100 if no amount specified
-            logger.info(f"Trading decision {action} found but no amount specified, defaulting to $100")
-            amount = 100.0
-        else:
+            # Check if symbol is valid
+            if symbol not in stock_prices:
+                logger.warning(f"Invalid symbol in decision: {symbol}")
+                continue
+
+            if action == 'HOLD':
+                logger.info(f"Trading decision: HOLD {symbol}")
+                continue
+
+            # Parse amount
+            if not amount_str:
+                logger.warning(f"Trading decision {action} {symbol} has no amount specified, skipping")
+                continue
+
             amount = float(amount_str)
+            stock_data = stock_prices[symbol]
+            price = stock_data['price']
+            timestamp = stock_data.get('timestamp', '')
 
-        symbol = data.get('symbol')
-        price = data.get('price')
-        timestamp = data.get('timestamp', '')
+            # Execute the trade
+            result = self.portfolio_manager.execute_trade(
+                symbol=symbol,
+                action=action.lower(),
+                amount=amount,
+                price=price,
+                timestamp=timestamp
+            )
 
-        if not symbol or not price:
-            logger.warning("Cannot execute trade: missing symbol or price")
-            return
+            if result['success']:
+                logger.info(f"✓ Trade executed: {action} ${amount} of {symbol} @ ${price:.2f}")
+                logger.info(f"  Remaining cash: ${result.get('remaining_cash', 0):.2f}")
 
-        # Execute the trade
-        result = self.portfolio_manager.execute_trade(
-            symbol=symbol,
-            action=action.lower(),
-            amount=amount,
-            price=price,
-            timestamp=timestamp
-        )
-
-        if result['success']:
-            logger.info(f"Trade executed: {action} ${amount} of {symbol} @ ${price:.2f}")
-        else:
-            logger.warning(f"Trade failed: {result.get('reason', 'Unknown error')}")
+                # Log portfolio summary after trade
+                summary = self.portfolio_manager.get_summary()
+                logger.info(f"  Portfolio value: ${summary['total_value']:.2f} (Cash: ${summary['cash']:.2f} + Positions: ${summary['total_value'] - summary['cash']:.2f})")
+            else:
+                logger.warning(f"✗ Trade failed: {action} ${amount} of {symbol} - {result.get('reason', 'Unknown error')}")
 
     def reset(self) -> None:
         """Reset strategy state."""

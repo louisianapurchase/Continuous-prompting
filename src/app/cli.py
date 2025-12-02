@@ -15,7 +15,6 @@ import sys
 from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
 from src.data.news_generator import NewsGenerator
 from src.llm import OllamaClient, PromptManager
-from src.strategies import ContinuousStrategy, EventDrivenStrategy
 from src.strategies.reactive_strategy import ReactiveStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
 from src.portfolio import PortfolioManager
@@ -68,7 +67,9 @@ def create_data_source(config: dict):
         )
     elif source_type == 'csv':
         csv_path = config['data'].get('csv_path', 'data/raw/trading_data.csv')
-        return CSVDataSource(csv_path)
+        sample_config = config['data'].get('sample', {})
+        symbols = sample_config.get('symbols', ['AAPL', 'GOOGL', 'MSFT', 'TSLA'])
+        return CSVDataSource(csv_path=csv_path, symbols=symbols)
     else:
         raise ValueError(f"Unknown data source type: {source_type}")
 
@@ -110,23 +111,11 @@ def create_strategy(config: dict, llm_client, prompt_manager, portfolio_manager=
     Returns:
         Strategy instance
     """
-    strategy_type = config['strategy']['type']
+    # Only reactive strategy is supported
     memory_manager = create_memory_manager(config)
-
-    if strategy_type == 'continuous':
-        strategy_config = config['strategy'].get('continuous', {})
-        strategy_config['memory'] = config.get('memory', {})
-        return ContinuousStrategy(llm_client, prompt_manager, strategy_config, memory_manager)
-    elif strategy_type == 'event_driven':
-        strategy_config = config['strategy'].get('event_driven', {})
-        strategy_config['memory'] = config.get('memory', {})
-        return EventDrivenStrategy(llm_client, prompt_manager, strategy_config, memory_manager)
-    elif strategy_type == 'reactive':
-        strategy_config = config['strategy'].get('reactive', {})
-        strategy_config['memory'] = config.get('memory', {})
-        return ReactiveStrategy(llm_client, prompt_manager, strategy_config, memory_manager, portfolio_manager)
-    else:
-        raise ValueError(f"Unknown strategy type: {strategy_type}")
+    strategy_config = config['strategy'].get('reactive', {})
+    strategy_config['memory'] = config.get('memory', {})
+    return ReactiveStrategy(llm_client, prompt_manager, strategy_config, memory_manager, portfolio_manager)
 
 
 def main():

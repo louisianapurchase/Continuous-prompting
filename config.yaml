@@ -13,7 +13,7 @@ llm:
 # Data Stream Configuration
 data:
   update_interval: 0.5  # seconds between data updates (faster for real-time feel)
-  source: "sample"      # Options: sample, csv, random
+  source: "sample"      # Options: sample, csv
 
   # For CSV source
   csv_path: "data/raw/trading_data.csv"

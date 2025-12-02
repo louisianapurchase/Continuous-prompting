@@ -44,12 +44,18 @@ class Position:
     
     def add_shares(self, shares: float, price: float):
         """Add shares to position (buy)."""
+        old_shares = self.shares
         if self.shares == 0:
+            # First purchase - set initial position
             self.avg_cost = price
+            self.shares = shares
+            logger.debug(f"  {self.symbol}: NEW position - {shares:.4f} shares @ ${price:.2f}")
         else:
+            # Adding to existing position - calculate new average cost
             total_cost = (self.shares * self.avg_cost) + (shares * price)
             self.shares += shares
             self.avg_cost = total_cost / self.shares
+            logger.debug(f"  {self.symbol}: ADDED {shares:.4f} shares @ ${price:.2f}, total now {self.shares:.4f} @ avg ${self.avg_cost:.2f}")
     
     def remove_shares(self, shares: float) -> bool:
         """Remove shares from position (sell). Returns True if successful."""
@@ -173,17 +179,20 @@ class PortfolioManager:
             # Check if we have enough cash
             cost = shares * price
             if cost > self.cash:
+                logger.warning(f"BUY FAILED: Insufficient cash ${self.cash:.2f} < ${cost:.2f}")
                 return {'success': False, 'reason': f'Insufficient cash: ${self.cash:.2f} < ${cost:.2f}'}
-            
+
             # Execute buy
             position.add_shares(shares, price)
             self.cash -= cost
             trade = Trade(symbol, 'buy', shares, price, timestamp)
             self.trades.append(trade)
             self.total_trades += 1
-            
-            logger.info(f"BUY: {shares:.4f} shares of {symbol} @ ${price:.2f} = ${cost:.2f}")
-            
+
+            logger.info(f"✓ BUY EXECUTED: {shares:.4f} shares of {symbol} @ ${price:.2f} = ${cost:.2f}")
+            logger.info(f"  Position now: {position.shares:.4f} shares @ avg ${position.avg_cost:.2f}")
+            logger.info(f"  Cash remaining: ${self.cash:.2f}")
+
             return {
                 'success': True,
                 'action': 'buy',
@@ -231,7 +240,19 @@ class PortfolioManager:
             pos.get_value(self.current_prices.get(symbol, 0))
             for symbol, pos in self.positions.items()
         )
-        return self.cash + positions_value
+        total = self.cash + positions_value
+
+        # Debug logging when value seems wrong
+        if total < self.total_initial_cash * 0.5:  # Lost more than 50%
+            logger.warning(f"Portfolio value seems low: ${total:.2f}")
+            logger.warning(f"  Cash: ${self.cash:.2f}")
+            logger.warning(f"  Positions value: ${positions_value:.2f}")
+            for symbol, pos in self.positions.items():
+                if pos.shares > 0:
+                    current_price = self.current_prices.get(symbol, 0)
+                    logger.warning(f"    {symbol}: {pos.shares:.4f} shares @ ${current_price:.2f} = ${pos.get_value(current_price):.2f}")
+
+        return total
     
     def get_buy_and_hold_value(self) -> float:
         """Get value of buy-and-hold strategy."""

@@ -67,10 +67,13 @@ class SampleDataSource(DataSource):
         self.current_prices = {
             symbol: fixed_prices.get(symbol, 150.00) for symbol in self.symbols
         }
-        
+
+        # Track starting prices to calculate total change from start
+        self.starting_prices = self.current_prices.copy()
+
         self.start_time = datetime.now()
         self.current_index = 0
-        
+
         logger.info(
             f"Sample data source initialized with symbols: {self.symbols}"
         )
@@ -97,12 +100,16 @@ class SampleDataSource(DataSource):
             # Generate volume
             volume = random.randint(*self.volume_range)
 
+            # Calculate total change from starting price (not just recent change)
+            starting_price = self.starting_prices[symbol]
+            total_change_pct = ((new_price - starting_price) / starting_price) * 100
+
             stock_data = {
                 'timestamp': timestamp.isoformat(),
                 'symbol': symbol,
                 'price': round(new_price, 2),
                 'volume': volume,
-                'change': round(price_change * 100, 2),  # percentage
+                'change': round(total_change_pct, 2),  # total % change from start
                 'high': round(new_price * 1.001, 2),
                 'low': round(new_price * 0.999, 2),
             }
@@ -119,9 +126,16 @@ class SampleDataSource(DataSource):
     
     def reset(self) -> None:
         """Reset to initial state."""
-        self.current_prices = {
-            symbol: random.uniform(100, 500) for symbol in self.symbols
+        fixed_prices = {
+            "AAPL": 150.00,
+            "GOOGL": 2800.00,
+            "MSFT": 380.00,
+            "TSLA": 250.00,
         }
+        self.current_prices = {
+            symbol: fixed_prices.get(symbol, 150.00) for symbol in self.symbols
+        }
+        self.starting_prices = self.current_prices.copy()
         self.start_time = datetime.now()
         self.current_index = 0
         logger.info("Sample data source reset.")
@@ -129,95 +143,93 @@ class SampleDataSource(DataSource):
 
 class CSVDataSource(DataSource):
     """
-    Loads trading data from a CSV file.
-    
+    Loads trading data from a CSV file and returns batches of all symbols.
+
     Expected CSV format:
-    timestamp,symbol,price,volume,high,low
+    timestamp,Symbol,price,volume,change,high,low,open
+
+    The CSV should contain data for multiple symbols with the same timestamps.
+    This source groups data by timestamp and returns all symbols together.
     """
-    
-    def __init__(self, csv_path: str):
+
+    def __init__(self, csv_path: str, symbols: List[str] = None):
         """
         Initialize CSV data source.
-        
+
         Args:
             csv_path: Path to CSV file
+            symbols: List of symbols to filter (None = use all symbols in CSV)
         """
         self.csv_path = csv_path
-        self.data = []
+        self.symbols = symbols
+        self.data_by_timestamp = {}
+        self.timestamps = []
         self.current_index = 0
         self._load_data()
-    
+
     def _load_data(self) -> None:
-        """Load data from CSV file."""
+        """Load data from CSV file and group by timestamp."""
         try:
             import pandas as pd
             df = pd.read_csv(self.csv_path)
-            self.data = df.to_dict('records')
+
+            # Filter by symbols if specified
+            if self.symbols:
+                df = df[df['Symbol'].isin(self.symbols)]
+
+            # Group data by timestamp
+            for timestamp, group in df.groupby('timestamp'):
+                stocks_data = []
+                for _, row in group.iterrows():
+                    stock_data = {
+                        'timestamp': str(row['timestamp']),
+                        'symbol': row['Symbol'],
+                        'price': float(row['price']),
+                        'volume': int(row['volume']),
+                        'change': float(row.get('change', 0)),
+                        'high': float(row.get('high', row['price'])),
+                        'low': float(row.get('low', row['price'])),
+                    }
+                    stocks_data.append(stock_data)
+
+                self.data_by_timestamp[timestamp] = stocks_data
+
+            self.timestamps = sorted(self.data_by_timestamp.keys())
+
             logger.info(
-                f"Loaded {len(self.data)} data points from {self.csv_path}"
+                f"Loaded {len(self.timestamps)} timestamps with {len(df)} total data points from {self.csv_path}"
             )
+            if self.timestamps:
+                logger.info(f"Time range: {self.timestamps[0]} to {self.timestamps[-1]}")
+
         except FileNotFoundError:
             logger.warning(
                 f"CSV file not found: {self.csv_path}. Using empty dataset."
             )
-            self.data = []
+            self.data_by_timestamp = {}
+            self.timestamps = []
         except Exception as e:
-            logger.error(f"Error loading CSV: {e}")
-            self.data = []
-    
+            logger.error(f"Error loading CSV: {e}", exc_info=True)
+            self.data_by_timestamp = {}
+            self.timestamps = []
+
     def get_next(self) -> Optional[Dict[str, Any]]:
-        """Get next data point from CSV."""
-        if self.current_index >= len(self.data):
+        """Get next batch of data (all symbols at current timestamp)."""
+        if self.current_index >= len(self.timestamps):
             return None
-        
-        data_point = self.data[self.current_index]
+
+        timestamp = self.timestamps[self.current_index]
+        stocks_data = self.data_by_timestamp[timestamp]
         self.current_index += 1
-        return data_point
-    
+
+        # Return batch format (same as SampleDataSource)
+        return {
+            'type': 'batch',
+            'timestamp': timestamp,
+            'stocks': stocks_data
+        }
+
     def reset(self) -> None:
         """Reset to beginning of CSV."""
         self.current_index = 0
         logger.info("CSV data source reset.")
-
-
-class RandomDataSource(DataSource):
-    """
-    Generates completely random trading data.
-    
-    Useful for stress testing and experimentation.
-    """
-    
-    def __init__(self, symbols: List[str] = None, max_points: Optional[int] = None):
-        """
-        Initialize random data source.
-        
-        Args:
-            symbols: List of stock symbols
-            max_points: Maximum number of data points (None for infinite)
-        """
-        self.symbols = symbols or ["STOCK_A", "STOCK_B", "STOCK_C"]
-        self.max_points = max_points
-        self.current_index = 0
-    
-    def get_next(self) -> Optional[Dict[str, Any]]:
-        """Generate random data point."""
-        if self.max_points and self.current_index >= self.max_points:
-            return None
-        
-        data_point = {
-            'timestamp': datetime.now().isoformat(),
-            'symbol': random.choice(self.symbols),
-            'price': round(random.uniform(10, 1000), 2),
-            'volume': random.randint(100, 100000),
-            'change': round(random.uniform(-10, 10), 2),
-            'high': round(random.uniform(10, 1000), 2),
-            'low': round(random.uniform(10, 1000), 2),
-        }
-        
-        self.current_index += 1
-        return data_point
-    
-    def reset(self) -> None:
-        """Reset counter."""
-        self.current_index = 0
-

@@ -23,7 +23,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
 from src.data.news_generator import NewsGenerator
 from src.llm import OllamaClient, PromptManager
-from src.strategies import ContinuousStrategy
 from src.strategies.reactive_strategy import ReactiveStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
 from src.portfolio import PortfolioManager
@@ -66,7 +65,10 @@ def create_components(settings):
             price_volatility=settings['volatility'],
         )
     else:
-        data_source = CSVDataSource(settings['csv_path'])
+        data_source = CSVDataSource(
+            csv_path=settings['csv_path'],
+            symbols=settings['symbols']
+        )
 
     # Create news generator
     news_generator = None
@@ -115,29 +117,20 @@ def create_components(settings):
         )
         logger.info(f"Portfolio initialized with ${portfolio_manager.cash:.2f} cash")
     
-    # Create strategy
-    strategy_type = settings['strategy']
-    strategy_config = config.get('strategy', {}).get(strategy_type, {})
+    # Create reactive strategy (only strategy supported)
+    strategy_config = config.get('strategy', {}).get('reactive', {})
 
     # Add enable_trading to strategy config
     if settings.get('enable_trading', True):
         strategy_config['enable_trading'] = True
 
-    if strategy_type == 'reactive':
-        strategy = ReactiveStrategy(
-            llm_client=llm_client,
-            prompt_manager=prompt_manager,
-            config=strategy_config,
-            memory_manager=memory_manager,
-            portfolio_manager=portfolio_manager
-        )
-    else:
-        strategy = ContinuousStrategy(
-            llm_client=llm_client,
-            prompt_manager=prompt_manager,
-            config=strategy_config,
-            memory_manager=memory_manager,
-        )
+    strategy = ReactiveStrategy(
+        llm_client=llm_client,
+        prompt_manager=prompt_manager,
+        config=strategy_config,
+        memory_manager=memory_manager,
+        portfolio_manager=portfolio_manager
+    )
     
     return simulator, strategy
 

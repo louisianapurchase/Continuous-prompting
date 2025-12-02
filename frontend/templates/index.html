@@ -410,25 +410,27 @@
             const positionsContainer = document.getElementById('portfolioPositions');
             if (summary.positions && summary.positions.length > 0) {
                 let html = '<div style="overflow-x: auto;"><table style="width: 100%; font-size: 0.875rem; color: #e2e8f0;">';
-                html += '<thead><tr style="border-bottom: 1px solid #334155;">';
-                html += '<th style="padding: 8px; text-align: left; color: #94a3b8;">Symbol</th>';
-                html += '<th style="padding: 8px; text-align: right; color: #94a3b8;">Shares</th>';
-                html += '<th style="padding: 8px; text-align: right; color: #94a3b8;">Avg Cost</th>';
-                html += '<th style="padding: 8px; text-align: right; color: #94a3b8;">Current</th>';
-                html += '<th style="padding: 8px; text-align: right; color: #94a3b8;">Value</th>';
-                html += '<th style="padding: 8px; text-align: right; color: #94a3b8;">P/L</th>';
+                html += '<thead><tr style="border-bottom: 2px solid #334155;">';
+                html += '<th style="padding: 10px; text-align: left; color: #94a3b8; font-weight: 600;">Stock</th>';
+                html += '<th style="padding: 10px; text-align: right; color: #94a3b8; font-weight: 600;">Shares</th>';
+                html += '<th style="padding: 10px; text-align: right; color: #94a3b8; font-weight: 600;">Bought At</th>';
+                html += '<th style="padding: 10px; text-align: right; color: #94a3b8; font-weight: 600;">Current Price</th>';
+                html += '<th style="padding: 10px; text-align: right; color: #94a3b8; font-weight: 600;">Total Value</th>';
+                html += '<th style="padding: 10px; text-align: right; color: #94a3b8; font-weight: 600;">Profit/Loss</th>';
                 html += '</tr></thead><tbody>';
 
                 summary.positions.forEach(pos => {
                     const plColor = pos.profit_loss >= 0 ? '#10b981' : '#ef4444';
-                    html += '<tr style="border-bottom: 1px solid #334155;">';
-                    html += `<td style="padding: 8px; font-weight: 600;">${pos.symbol}</td>`;
-                    html += `<td style="padding: 8px; text-align: right;">${pos.shares.toFixed(4)}</td>`;
-                    html += `<td style="padding: 8px; text-align: right;">$${pos.avg_cost.toFixed(2)}</td>`;
-                    html += `<td style="padding: 8px; text-align: right;">$${pos.current_price.toFixed(2)}</td>`;
-                    html += `<td style="padding: 8px; text-align: right;">$${pos.value.toFixed(2)}</td>`;
-                    html += `<td style="padding: 8px; text-align: right; color: ${plColor}; font-weight: 600;">`;
-                    html += `${pos.profit_loss >= 0 ? '+' : ''}$${pos.profit_loss.toFixed(2)} (${pos.profit_loss_pct >= 0 ? '+' : ''}${pos.profit_loss_pct.toFixed(2)}%)`;
+                    const plBgColor = pos.profit_loss >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                    html += `<tr style="border-bottom: 1px solid #334155;">`;
+                    html += `<td style="padding: 10px; font-weight: 700; font-size: 1rem; color: #e2e8f0;">${pos.symbol}</td>`;
+                    html += `<td style="padding: 10px; text-align: right; color: #cbd5e1;">${pos.shares.toFixed(4)}</td>`;
+                    html += `<td style="padding: 10px; text-align: right; color: #cbd5e1;">$${pos.avg_cost.toFixed(2)}</td>`;
+                    html += `<td style="padding: 10px; text-align: right; color: #cbd5e1;">$${pos.current_price.toFixed(2)}</td>`;
+                    html += `<td style="padding: 10px; text-align: right; font-weight: 600; color: #e2e8f0;">$${pos.value.toFixed(2)}</td>`;
+                    html += `<td style="padding: 10px; text-align: right; color: ${plColor}; font-weight: 700; background: ${plBgColor};">`;
+                    html += `${pos.profit_loss >= 0 ? '+' : ''}$${pos.profit_loss.toFixed(2)}<br>`;
+                    html += `<span style="font-size: 0.75rem;">(${pos.profit_loss_pct >= 0 ? '+' : ''}${pos.profit_loss_pct.toFixed(2)}%)</span>`;
                     html += '</td></tr>';
                 });
 
