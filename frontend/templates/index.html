@@ -6,6 +6,8 @@
     <title>Continuous Prompting - Real-Time Trading</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
         body {
             background-color: #0f172a;
@@ -136,7 +138,16 @@
 
                 <!-- Price Charts - Tabbed Interface -->
                 <div class="card">
-                    <h2 class="text-xl font-bold text-gray-200 mb-4">Price Movement</h2>
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-200">Price Movement</h2>
+                        <button onclick="resetZoom()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1 rounded text-sm font-semibold">
+                            Reset Zoom
+                        </button>
+                    </div>
+
+                    <p class="text-gray-400 text-sm mb-3">
+                        💡 <strong>Scroll wheel</strong> to zoom in/out • <strong>Click & drag</strong> to pan left/right
+                    </p>
 
                     <!-- Tabs -->
                     <div class="flex space-x-2 mb-4 border-b border-gray-600">
@@ -260,7 +271,27 @@
                             display: true,
                             labels: { color: '#94a3b8', font: { size: 14 } }
                         },
-                        tooltip: { enabled: true }
+                        tooltip: { enabled: true },
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            limits: {
+                                x: {min: 'original', max: 'original'}
+                            }
+                        }
                     }
                 }
             });
@@ -271,6 +302,12 @@
                     switchTab(button.dataset.symbol);
                 });
             });
+        }
+
+        function resetZoom() {
+            if (priceChart) {
+                priceChart.resetZoom();
+            }
         }
 
         function switchTab(symbol) {
@@ -357,12 +394,12 @@
 
             const timestamp = new Date(batchData.timestamp).toLocaleTimeString();
 
-            // Update each stock's data (keep ALL historical data)
+            // Update each stock's data (keep ALL data for scrolling/zooming)
             stocks.forEach(stock => {
                 const symbol = stock.symbol;
                 if (!chartData[symbol]) return;
 
-                // Add timestamp and price - NO LIMIT, keep all data
+                // Add timestamp and price
                 chartData[symbol].labels.push(timestamp);
                 chartData[symbol].data.push(stock.price);
             });
@@ -371,6 +408,13 @@
             if (priceChart) {
                 priceChart.data.labels = chartData[currentSymbol].labels;
                 priceChart.data.datasets[0].data = chartData[currentSymbol].data;
+
+                // Auto-pan to show latest data (last 100 points visible)
+                const dataLength = chartData[currentSymbol].labels.length;
+                if (dataLength > 100) {
+                    priceChart.zoomScale('x', {min: dataLength - 100, max: dataLength}, 'none');
+                }
+
                 priceChart.update('none');
             }
         }

@@ -130,10 +130,10 @@ pip install chromadb sentence-transformers
 
 ## Quick Start
 
-### Option 1: Web Interface with Simulated Data (Fastest)
+### Web Interface (Recommended)
 
 ```bash
-python run_flask.py
+python run.py
 ```
 
 Open your browser to `http://localhost:5000`
@@ -151,29 +151,26 @@ Open your browser to `http://localhost:5000`
 4. Monitor portfolio performance
 5. Click "Stop" when done
 
-### Option 2: Web Interface with Real Stock Data (Recommended)
+**Automatic Real Data Download:**
+- If you set `source: "csv"` in config.yaml, the app **automatically downloads** real stock data on startup
+- **During market hours (9:30 AM - 4:00 PM ET)**: Updates CSV every 60 seconds with new data
+- **After market hours**: Uses existing data (no updates needed)
+- No manual download required!
 
-**Step 1: Download real data**
-```bash
-pip install yfinance
-python scripts/download_real_data.py
-```
-
-This downloads 1-minute interval data for AAPL, GOOGL, MSFT, TSLA from Yahoo Finance (last trading day, ~390 data points per stock).
-
-**Step 2: Update config.yaml**
+**To use real data:**
 ```yaml
+# config.yaml
 data:
-  source: "csv"  # Change from "sample"
+  source: "csv"  # Automatically downloads and updates during market hours
   csv_path: "data/raw/real_trading_data_1m_1d.csv"
 ```
 
-**Step 3: Run the app**
-```bash
-python run_flask.py
+**To use simulated data:**
+```yaml
+# config.yaml
+data:
+  source: "sample"  # Fast, works offline, no downloads
 ```
-
-Now you'll see **real historical stock data** playing back! See [REAL_DATA_SETUP.md](REAL_DATA_SETUP.md) for full details.
 
 **Why Flask instead of Streamlit?**
 - **No page reloads** - True real-time updates via Server-Sent Events
@@ -184,10 +181,10 @@ Now you'll see **real historical stock data** playing back! See [REAL_DATA_SETUP
 ### Command Line Interface
 
 ```bash
-python run.py                      # Run with defaults
-python run.py --max-iterations 50  # Limit to 50 data points
-python run.py --display compact    # Compact output mode
-python run.py --display minimal    # Minimal output (logs only)
+python run.py --cli                      # Run CLI interface
+python run.py --cli --max-iterations 50  # Limit to 50 data points
+python run.py --cli --display compact    # Compact output mode
+python run.py --cli --display minimal    # Minimal output (logs only)
 ```
 
 **What you'll see:**
@@ -1299,6 +1296,175 @@ This project is provided as-is for educational and research purposes.
 - Tailwind CSS for modern UI styling
 - ChromaDB for vector storage
 - The open-source LLM community
+
+---
+
+## Using Real Stock Data
+
+### Quick Setup (Automatic!)
+
+**Step 1: Update config.yaml**
+```yaml
+data:
+  source: "csv"
+  csv_path: "data/raw/real_trading_data_1m_1d.csv"
+```
+
+**Step 2: Run the App**
+```bash
+python run.py
+```
+
+**That's it!** The app will:
+- ✅ Automatically download data if the CSV doesn't exist
+- ✅ Automatically download fresh data if the CSV is from a previous day
+- ✅ **During market hours**: Update the CSV every 60 seconds with new data
+- ✅ **After market hours**: Use the complete day's data (no updates needed)
+
+**Manual Download (Optional):**
+
+If you want to download data manually:
+```bash
+python scripts/download_real_data.py
+```
+
+### What You Get
+
+**Real Data:**
+- Actual historical prices from Yahoo Finance
+- Real trading volumes
+- Realistic market movements
+- Accurate percentage changes
+
+**Example:**
+- AAPL: 390 data points from 9:30 AM to 4:00 PM ET
+- GOOGL: 390 data points from 9:30 AM to 4:00 PM ET
+- MSFT: 390 data points from 9:30 AM to 4:00 PM ET
+- TSLA: 390 data points from 9:30 AM to 4:00 PM ET
+
+**Total: ~1,560 data points** (one full trading day)
+
+### Customization
+
+**Download Different Time Periods:**
+
+Edit `scripts/download_real_data.py`:
+
+```python
+# 5-minute intervals for 5 days
+INTERVAL = '5m'
+PERIOD = '5d'
+
+# 15-minute intervals for 1 month
+INTERVAL = '15m'
+PERIOD = '1mo'
+```
+
+**Download Different Stocks:**
+
+Edit `scripts/download_real_data.py`:
+
+```python
+SYMBOLS = ['AAPL', 'TSLA', 'NVDA', 'AMD']
+```
+
+Then update `config.yaml`:
+
+```yaml
+data:
+  sample:
+    symbols: ['AAPL', 'TSLA', 'NVDA', 'AMD']
+```
+
+### Data Playback Speed
+
+The `update_interval` in `config.yaml` controls how fast the data plays back:
+
+```yaml
+data:
+  update_interval: 0.5  # 0.5 seconds between data points
+```
+
+**Examples:**
+- `0.1` - Very fast (10 data points per second)
+- `0.5` - Fast (2 data points per second) - **recommended**
+- `1.0` - Normal (1 data point per second)
+- `2.0` - Slow (1 data point every 2 seconds)
+
+**Note:** If you downloaded 1-minute interval data, setting `update_interval: 0.5` means each real minute of trading will play back in 0.5 seconds (120x speed). A full trading day (6.5 hours) plays back in ~3 minutes!
+
+### Market Hours and Data Availability
+
+**Does the app only work during market hours?**
+
+**No! The app works 24/7.**
+
+**With Simulated Data (default):**
+- Works anytime, anywhere
+- No dependency on market hours or internet
+- Perfect for testing and development
+
+**With Real Historical Data (CSV):**
+- Works anytime, anywhere
+- Plays back previously downloaded historical data
+- No dependency on market hours (after data is downloaded)
+- Data is from actual trading days, but you can replay it anytime
+
+**Market hours only matter when downloading new data:**
+
+**Yahoo Finance Data Availability:**
+- **Market hours**: 9:30 AM - 4:00 PM ET (Monday-Friday)
+- **Weekends**: No trading data available
+- **Holidays**: No trading data on market holidays
+- **After hours**: Limited data availability
+
+**What this means:**
+- If you run the download script on a **Saturday**, it will download Friday's data
+- If you run it on a **Monday at 2 PM ET**, it will download Monday's data up to 2 PM
+- If you run it on a **Monday at 8 AM ET**, it will download Friday's data (Monday hasn't started yet)
+
+**How the CSV changes throughout the day:**
+- **During market hours**: Each time you download, you get more data points
+  - 10:00 AM: ~30 data points (9:30-10:00 AM)
+  - 12:00 PM: ~150 data points (9:30 AM-12:00 PM)
+  - 4:00 PM: ~390 data points (full trading day)
+- **After market close**: You get the complete day's data (~390 points)
+- **Next day**: The download gets the new day's data
+
+**Best practice:** Download data after market close (after 4:00 PM ET) to get a complete trading day.
+
+### Yahoo Finance Limitations
+
+- **1-minute data**: Only last 7 days available
+- **5-minute data**: Several months available
+- **15-minute+ data**: Years of data available
+- **Market hours only**: No data outside 9:30 AM - 4:00 PM ET
+- **No weekends**: No data on weekends or holidays
+- **Free and unlimited**: No API key required
+
+### Troubleshooting
+
+**"No data downloaded"**
+- Market may be closed (weekends, holidays, after hours)
+- Try downloading data for a previous weekday
+- Try a longer period: `PERIOD = '5d'`
+
+**"CSV file not found"**
+- Make sure you ran `python scripts/download_real_data.py` first
+- Check that the file exists: `data/raw/real_trading_data_1m_1d.csv`
+- Check the path in `config.yaml` matches the downloaded file
+
+**"Data plays back too fast/slow"**
+- Adjust `update_interval` in `config.yaml`
+- Smaller = faster, larger = slower
+
+### Benefits of Real Data
+
+✅ **Realistic testing** - See how your LLM responds to real market conditions
+✅ **Reproducible** - Same data every time you run it
+✅ **Historical events** - Includes real news events, earnings, etc.
+✅ **Accurate patterns** - Real support/resistance levels, trends, volatility
+✅ **Better training** - Helps tune your LLM prompts and triggers
 
 ---
 

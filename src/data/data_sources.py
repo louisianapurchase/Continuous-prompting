@@ -56,13 +56,13 @@ class SampleDataSource(DataSource):
         self.volume_range = volume_range
         self.max_points = max_points
 
-        # Initialize prices for each symbol with FIXED realistic starting prices
-        # This prevents massive jumps when simulator restarts
+        # Initialize prices for each symbol with CURRENT realistic starting prices
+        # Updated December 2025 - GOOGL had 20:1 split in July 2022
         fixed_prices = {
-            "AAPL": 150.00,
-            "GOOGL": 2800.00,
-            "MSFT": 380.00,
-            "TSLA": 250.00,
+            "AAPL": 175.00,   # Current price ~$175
+            "GOOGL": 140.00,  # Current price ~$140 (after 20:1 split)
+            "MSFT": 380.00,   # Current price ~$380
+            "TSLA": 240.00,   # Current price ~$240
         }
         self.current_prices = {
             symbol: fixed_prices.get(symbol, 150.00) for symbol in self.symbols
@@ -127,10 +127,10 @@ class SampleDataSource(DataSource):
     def reset(self) -> None:
         """Reset to initial state."""
         fixed_prices = {
-            "AAPL": 150.00,
-            "GOOGL": 2800.00,
-            "MSFT": 380.00,
-            "TSLA": 250.00,
+            "AAPL": 175.00,   # Current price ~$175
+            "GOOGL": 140.00,  # Current price ~$140 (after 20:1 split)
+            "MSFT": 380.00,   # Current price ~$380
+            "TSLA": 240.00,   # Current price ~$240
         }
         self.current_prices = {
             symbol: fixed_prices.get(symbol, 150.00) for symbol in self.symbols
@@ -165,12 +165,19 @@ class CSVDataSource(DataSource):
         self.data_by_timestamp = {}
         self.timestamps = []
         self.current_index = 0
+        self.last_file_mtime = None
         self._load_data()
 
     def _load_data(self) -> None:
         """Load data from CSV file and group by timestamp."""
         try:
             import pandas as pd
+            import os
+
+            # Track file modification time
+            if os.path.exists(self.csv_path):
+                self.last_file_mtime = os.path.getmtime(self.csv_path)
+
             df = pd.read_csv(self.csv_path)
 
             # Filter by symbols if specified
@@ -178,6 +185,7 @@ class CSVDataSource(DataSource):
                 df = df[df['Symbol'].isin(self.symbols)]
 
             # Group data by timestamp
+            self.data_by_timestamp = {}  # Clear existing data
             for timestamp, group in df.groupby('timestamp'):
                 stocks_data = []
                 for _, row in group.iterrows():
@@ -208,15 +216,51 @@ class CSVDataSource(DataSource):
             )
             self.data_by_timestamp = {}
             self.timestamps = []
+
+    def reload_if_modified(self) -> bool:
+        """
+        Check if CSV file has been modified and reload if needed.
+
+        Returns:
+            True if data was reloaded, False otherwise
+        """
+        try:
+            import os
+            if not os.path.exists(self.csv_path):
+                return False
+
+            current_mtime = os.path.getmtime(self.csv_path)
+            if self.last_file_mtime is None or current_mtime > self.last_file_mtime:
+                logger.info(f"CSV file modified. Reloading data from {self.csv_path}")
+                old_index = self.current_index
+                self._load_data()
+                # Keep current position if possible
+                self.current_index = min(old_index, len(self.timestamps) - 1)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error checking CSV modification: {e}")
+            return False
         except Exception as e:
             logger.error(f"Error loading CSV: {e}", exc_info=True)
             self.data_by_timestamp = {}
             self.timestamps = []
 
     def get_next(self) -> Optional[Dict[str, Any]]:
-        """Get next batch of data (all symbols at current timestamp)."""
+        """
+        Get next batch of data (all symbols at current timestamp).
+
+        If we've reached the end, check if CSV has been updated with new data.
+        """
+        # Check if we've reached the end
         if self.current_index >= len(self.timestamps):
-            return None
+            # Try to reload if CSV has been modified
+            if self.reload_if_modified():
+                # If we got new data and we're still at the end, we're caught up
+                if self.current_index >= len(self.timestamps):
+                    return None
+            else:
+                return None
 
         timestamp = self.timestamps[self.current_index]
         stocks_data = self.data_by_timestamp[timestamp]

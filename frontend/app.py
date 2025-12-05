@@ -20,8 +20,8 @@ from flask import Flask, render_template, Response, jsonify, request
 # Add parent directory to path to import src modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
-from src.data.news_generator import NewsGenerator
+from src.data import SampleDataSource, CSVDataSource
+from src.data import ensure_data_available, LiveDataUpdater, is_market_hours
 from src.llm import OllamaClient, PromptManager
 from src.strategies.reactive_strategy import ReactiveStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
@@ -35,14 +35,17 @@ app = Flask(__name__, template_folder=template_dir)
 app.config['SECRET_KEY'] = 'continuous-prompting-secret-key'
 
 # Global state
-simulator_thread = None
+stream_thread = None
 event_queue = Queue()
 is_running = False
 portfolio_manager = None
 strategy = None
+data_source = None
 data_history = []
 response_history = []
 executor = ThreadPoolExecutor(max_workers=2)  # For async LLM processing
+live_updater = None  # Live data updater for market hours
+update_interval = 0.5  # Seconds between data points
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -56,7 +59,10 @@ config = load_config()
 
 def create_components(settings):
     """Create all necessary components based on settings."""
-    global portfolio_manager, strategy
+    global portfolio_manager, strategy, live_updater, data_source, update_interval
+
+    # Store update interval
+    update_interval = settings['update_interval']
 
     # Create data source
     if settings['data_source'] == 'sample':
@@ -65,25 +71,29 @@ def create_components(settings):
             price_volatility=settings['volatility'],
         )
     else:
+        # Ensure CSV data is available (download if needed)
+        logger.info("Checking for CSV data...")
+        ensure_data_available(
+            symbols=settings['symbols'],
+            csv_path=settings['csv_path']
+        )
+
+        # Start live updater if during market hours
+        if is_market_hours():
+            logger.info("Market is open! Starting live data updater...")
+            live_updater = LiveDataUpdater(
+                symbols=settings['symbols'],
+                csv_path=settings['csv_path'],
+                update_interval=60  # Update every 60 seconds
+            )
+            live_updater.start()
+        else:
+            logger.info("Market is closed. Using existing data.")
+
         data_source = CSVDataSource(
             csv_path=settings['csv_path'],
             symbols=settings['symbols']
         )
-
-    # Create news generator
-    news_generator = None
-    if settings.get('enable_news', True):
-        news_generator = NewsGenerator(
-            symbols=settings['symbols'],
-            events_per_day=settings.get('news_events_per_day', 1.5)
-        )
-
-    # Create simulator
-    simulator = TradingDataSimulator(
-        data_source=data_source,
-        update_interval=settings['update_interval'],
-        news_generator=news_generator,
-    )
 
     # Create LLM client
     llm_client = OllamaClient(
@@ -116,7 +126,7 @@ def create_components(settings):
             initial_cash_per_symbol=settings.get('initial_cash_per_symbol', 1000.0)
         )
         logger.info(f"Portfolio initialized with ${portfolio_manager.cash:.2f} cash")
-    
+
     # Create reactive strategy (only strategy supported)
     strategy_config = config.get('strategy', {}).get('reactive', {})
 
@@ -131,19 +141,45 @@ def create_components(settings):
         memory_manager=memory_manager,
         portfolio_manager=portfolio_manager
     )
-    
-    return simulator, strategy
+
+    return strategy
 
 
-def process_stream(simulator, strategy):
-    """Process data stream and send events to clients."""
-    global is_running, data_history, response_history
+def process_stream(strategy):
+    """Process data stream directly from data source and send events to clients."""
+    global is_running, data_history, response_history, data_source, update_interval
 
     try:
-        for data_point in simulator.stream():
-            if not is_running:
-                logger.info("Stream stopped by user")
-                break
+        last_check_date = None
+
+        while is_running:
+            # Check if we've entered a new trading day
+            from zoneinfo import ZoneInfo
+            et_tz = ZoneInfo('America/New_York')
+            current_date = datetime.now(et_tz).date()
+
+            if last_check_date is not None and current_date > last_check_date:
+                logger.info(f"New trading day detected: {current_date}. Reloading data source...")
+                # Force reload of data source to pick up new day's data
+                data_source.reload_if_modified()
+                last_check_date = current_date
+            elif last_check_date is None:
+                last_check_date = current_date
+
+            # Get next data point from source
+            data_point = data_source.get_next()
+
+            if data_point is None:
+                # Check if market is open - if so, wait for new data
+                if is_market_hours():
+                    logger.info("Caught up with live data. Waiting for new data...")
+                    time.sleep(10)  # Wait 10 seconds before checking again
+                    continue
+                else:
+                    logger.info("Data source exhausted and market is closed. Waiting for next trading day...")
+                    # Wait 5 minutes before checking again (in case market opens)
+                    time.sleep(300)
+                    continue
 
             try:
                 # Handle batch data
@@ -164,7 +200,7 @@ def process_stream(simulator, strategy):
                         if len(data_history) > 400:
                             data_history.pop(0)
 
-                    # Send data update to clients
+                    # Send data update to clients (use CSV timestamp, not current time!)
                     event_queue.put({
                         'type': 'data',
                         'data': data_point
@@ -177,7 +213,7 @@ def process_stream(simulator, strategy):
                             response = strategy.process_data_point(data_pt)
                             if response:
                                 response_entry = {
-                                    'timestamp': datetime.now().isoformat(),
+                                    'timestamp': data_pt.get('timestamp'),  # Use data timestamp, not current time
                                     'data': data_pt,
                                     'response': response,
                                 }
@@ -214,6 +250,9 @@ def process_stream(simulator, strategy):
                 logger.error(f"Error processing data point: {e}", exc_info=True)
                 continue
 
+            # Wait before next data point
+            time.sleep(update_interval)
+
     except Exception as e:
         logger.error(f"Fatal error in stream processing: {e}", exc_info=True)
         event_queue.put({
@@ -234,7 +273,7 @@ def index():
 @app.route('/api/start', methods=['POST'])
 def start_simulation():
     """Start the simulation."""
-    global simulator_thread, is_running, data_history, response_history
+    global stream_thread, is_running, data_history, response_history
 
     if is_running:
         return jsonify({'error': 'Simulation already running'}), 400
@@ -243,7 +282,8 @@ def start_simulation():
     settings = request.json or {}
 
     # Apply defaults from config
-    settings.setdefault('data_source', 'sample')
+    settings.setdefault('data_source', config['data']['source'])
+    settings.setdefault('csv_path', config['data'].get('csv_path', 'data/raw/real_trading_data_1m_1d.csv'))
     settings.setdefault('symbols', config['data']['sample']['symbols'])
     settings.setdefault('volatility', config['data']['sample']['price_volatility'])
     settings.setdefault('update_interval', config['data']['update_interval'])
@@ -253,21 +293,19 @@ def start_simulation():
     settings.setdefault('strategy', config['strategy']['type'])
     settings.setdefault('enable_trading', config['trading']['enabled'])
     settings.setdefault('initial_cash_per_symbol', config['trading']['initial_cash_per_symbol'])
-    settings.setdefault('enable_news', config['data']['news']['enabled'])
-    settings.setdefault('news_events_per_day', config['data']['news']['events_per_day'])
 
     # Clear history
     data_history.clear()
     response_history.clear()
 
     # Create components
-    simulator, strat = create_components(settings)
+    strat = create_components(settings)
 
-    # Start simulation thread
+    # Start stream thread
     is_running = True
-    simulator_thread = Thread(target=process_stream, args=(simulator, strat))
-    simulator_thread.daemon = True
-    simulator_thread.start()
+    stream_thread = Thread(target=process_stream, args=(strat,))
+    stream_thread.daemon = True
+    stream_thread.start()
 
     return jsonify({'status': 'started'})
 
@@ -275,20 +313,30 @@ def start_simulation():
 @app.route('/api/stop', methods=['POST'])
 def stop_simulation():
     """Stop the simulation."""
-    global is_running
+    global is_running, live_updater
     is_running = False
+
+    # Stop live updater if running
+    if live_updater:
+        live_updater.stop()
+
     return jsonify({'status': 'stopped'})
 
 
 @app.route('/api/reset', methods=['POST'])
 def reset_simulation():
     """Reset the simulation."""
-    global is_running, data_history, response_history, portfolio_manager
+    global is_running, data_history, response_history, portfolio_manager, live_updater
 
     is_running = False
     data_history.clear()
     response_history.clear()
     portfolio_manager = None
+
+    # Stop live updater if running
+    if live_updater:
+        live_updater.stop()
+        live_updater = None
 
     return jsonify({'status': 'reset'})
 

@@ -13,10 +13,10 @@ llm:
 # Data Stream Configuration
 data:
   update_interval: 0.5  # seconds between data updates (faster for real-time feel)
-  source: "sample"      # Options: sample, csv
+  source: "csv"         # Options: sample, csv
 
-  # For CSV source
-  csv_path: "data/raw/trading_data.csv"
+  # For CSV source (real historical data from Yahoo Finance)
+  csv_path: "data/raw/real_trading_data_1m_1d.csv"
 
   # Sample data configuration
   sample:

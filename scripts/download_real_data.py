@@ -75,47 +75,74 @@ def download_stock_data(symbol, interval='1m', period='1d'):
     
     return df
 
-def main():
-    """Download data for all symbols and save to CSV."""
+def main(append_mode=False):
+    """
+    Download data for all symbols and save to CSV.
+
+    Args:
+        append_mode: If True, append new data to existing CSV instead of replacing
+    """
     print("=" * 60)
     print("Real Stock Data Downloader")
     print("=" * 60)
     print(f"Symbols: {', '.join(SYMBOLS)}")
     print(f"Interval: {INTERVAL}")
     print(f"Period: {PERIOD}")
+    print(f"Mode: {'APPEND' if append_mode else 'REPLACE'}")
     print("=" * 60)
     print()
-    
+
     all_data = []
-    
+
     for symbol in SYMBOLS:
         df = download_stock_data(symbol, interval=INTERVAL, period=PERIOD)
         if df is not None:
             all_data.append(df)
         print()
-    
+
     if not all_data:
         print("ERROR: No data downloaded for any symbol!")
         return
-    
+
     # Combine all data
     combined_df = pd.concat(all_data, ignore_index=True)
-    
+
     # Sort by timestamp
     combined_df.sort_values('timestamp', inplace=True)
-    
+
     # Create data directory if it doesn't exist
     os.makedirs('data/raw', exist_ok=True)
-    
+
     # Save to CSV
     output_file = f'data/raw/real_trading_data_{INTERVAL}_{PERIOD}.csv'
+
+    if append_mode and os.path.exists(output_file):
+        # Load existing data
+        print(f"Loading existing data from {output_file}...")
+        existing_df = pd.read_csv(output_file)
+        print(f"  Existing data points: {len(existing_df)}")
+
+        # Combine with new data
+        combined_df = pd.concat([existing_df, combined_df], ignore_index=True)
+
+        # Remove duplicates (same timestamp + symbol)
+        combined_df['timestamp'] = pd.to_datetime(combined_df['timestamp'])
+        combined_df = combined_df.drop_duplicates(subset=['timestamp', 'Symbol'], keep='last')
+
+        # Sort by timestamp
+        combined_df.sort_values('timestamp', inplace=True)
+
+        print(f"  After merging: {len(combined_df)} total data points")
+
     combined_df.to_csv(output_file, index=False)
-    
+
     print("=" * 60)
     print("Download Complete!")
     print("=" * 60)
     print(f"Total data points: {len(combined_df)}")
     print(f"Saved to: {output_file}")
+    if len(combined_df) > 0:
+        print(f"Time range: {combined_df['timestamp'].min()} to {combined_df['timestamp'].max()}")
     print()
     print("To use this data, update config.yaml:")
     print("  data:")
