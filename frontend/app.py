@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.data import SampleDataSource, CSVDataSource
 from src.data import ensure_data_available, LiveDataUpdater, is_market_hours
 from src.llm import OllamaClient, PromptManager
-from src.strategies.reactive_strategy import ReactiveStrategy
+from src.strategies import AutonomousStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
 from src.portfolio import PortfolioManager
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Set template folder explicitly to handle different import methods
 template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
 app = Flask(__name__, template_folder=template_dir)
-app.config['SECRET_KEY'] = 'continuous-prompting-secret-key'
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Global state
 stream_thread = None
@@ -49,7 +49,15 @@ update_interval = 0.5  # Seconds between data points
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
-    """Load configuration from YAML file."""
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Configuration dictionary
+    """
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -57,8 +65,16 @@ def load_config(config_path: str = "config.yaml") -> dict:
 config = load_config()
 
 
-def create_components(settings):
-    """Create all necessary components based on settings."""
+def create_components(settings: dict) -> AutonomousStrategy:
+    """
+    Create all necessary components based on settings.
+
+    Args:
+        settings: Configuration dictionary with application settings
+
+    Returns:
+        Configured AutonomousStrategy instance
+    """
     global portfolio_manager, strategy, live_updater, data_source, update_interval
 
     # Store update interval
@@ -127,26 +143,29 @@ def create_components(settings):
         )
         logger.info(f"Portfolio initialized with ${portfolio_manager.cash:.2f} cash")
 
-    # Create reactive strategy (only strategy supported)
-    strategy_config = config.get('strategy', {}).get('reactive', {})
+    # Create autonomous strategy
+    strategy_config = config.get('strategy', {}).get('autonomous', {})
+    strategy_config['enable_trading'] = settings.get('enable_trading', True)
 
-    # Add enable_trading to strategy config
-    if settings.get('enable_trading', True):
-        strategy_config['enable_trading'] = True
-
-    strategy = ReactiveStrategy(
+    strategy = AutonomousStrategy(
         llm_client=llm_client,
         prompt_manager=prompt_manager,
         config=strategy_config,
         memory_manager=memory_manager,
         portfolio_manager=portfolio_manager
     )
+    logger.info("Using Autonomous Strategy (LLM self-activation with Chain-of-Thought)")
 
     return strategy
 
 
-def process_stream(strategy):
-    """Process data stream directly from data source and send events to clients."""
+def process_stream(strategy: AutonomousStrategy) -> None:
+    """
+    Process data stream directly from data source and send events to clients.
+
+    Args:
+        strategy: Configured AutonomousStrategy instance
+    """
     global is_running, data_history, response_history, data_source, update_interval
 
     try:
@@ -173,12 +192,19 @@ def process_stream(strategy):
                 # Check if market is open - if so, wait for new data
                 if is_market_hours():
                     logger.info("Caught up with live data. Waiting for new data...")
-                    time.sleep(10)  # Wait 10 seconds before checking again
+                    # Wait 10 seconds, but check is_running every second
+                    for _ in range(10):
+                        if not is_running:
+                            break
+                        time.sleep(1)
                     continue
                 else:
                     logger.info("Data source exhausted and market is closed. Waiting for next trading day...")
-                    # Wait 5 minutes before checking again (in case market opens)
-                    time.sleep(300)
+                    # Wait 5 minutes, but check is_running every 10 seconds
+                    for _ in range(30):
+                        if not is_running:
+                            break
+                        time.sleep(10)
                     continue
 
             try:
@@ -265,14 +291,24 @@ def process_stream(strategy):
 
 
 @app.route('/')
-def index():
-    """Render main page."""
+def index() -> str:
+    """
+    Render main page.
+
+    Returns:
+        Rendered HTML template
+    """
     return render_template('index.html')
 
 
 @app.route('/api/start', methods=['POST'])
-def start_simulation():
-    """Start the simulation."""
+def start_simulation() -> tuple:
+    """
+    Start the simulation.
+
+    Returns:
+        JSON response with success status and HTTP status code
+    """
     global stream_thread, is_running, data_history, response_history
 
     if is_running:
@@ -311,8 +347,13 @@ def start_simulation():
 
 
 @app.route('/api/stop', methods=['POST'])
-def stop_simulation():
-    """Stop the simulation."""
+def stop_simulation() -> dict:
+    """
+    Stop the simulation.
+
+    Returns:
+        JSON response with status
+    """
     global is_running, live_updater
     is_running = False
 
@@ -324,8 +365,13 @@ def stop_simulation():
 
 
 @app.route('/api/reset', methods=['POST'])
-def reset_simulation():
-    """Reset the simulation."""
+def reset_simulation() -> dict:
+    """
+    Reset the simulation.
+
+    Returns:
+        JSON response with status
+    """
     global is_running, data_history, response_history, portfolio_manager, live_updater
 
     is_running = False
@@ -342,8 +388,13 @@ def reset_simulation():
 
 
 @app.route('/api/status')
-def get_status():
-    """Get current status."""
+def get_status() -> dict:
+    """
+    Get current status.
+
+    Returns:
+        JSON response with current status information
+    """
     return jsonify({
         'running': is_running,
         'data_points': len(data_history),
@@ -352,16 +403,26 @@ def get_status():
 
 
 @app.route('/api/portfolio')
-def get_portfolio():
-    """Get portfolio summary."""
+def get_portfolio() -> tuple:
+    """
+    Get portfolio summary.
+
+    Returns:
+        JSON response with portfolio summary or error
+    """
     if portfolio_manager:
         return jsonify(portfolio_manager.get_summary())
     return jsonify({'error': 'Portfolio not initialized'}), 404
 
 
 @app.route('/stream')
-def stream():
-    """Server-Sent Events stream for real-time updates."""
+def stream() -> Response:
+    """
+    Server-Sent Events stream for real-time updates.
+
+    Returns:
+        Flask Response object with SSE stream
+    """
     def event_stream():
         try:
             while True:

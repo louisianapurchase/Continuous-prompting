@@ -4,28 +4,40 @@ An experimental framework for exploring continuous LLM prompting with streaming 
 
 ## Recent Updates (December 2025)
 
-**Latest Updates (December 2):**
-- **Real stock data support** - Download and use actual historical intraday data from Yahoo Finance
-- **Fixed portfolio tracking** - Positions now display correctly with accurate P/L calculations
-- **Improved LLM context** - Portfolio status now appears at the TOP of prompts (critical info first)
-- **Better percentage tracking** - Live prices show total change from start, not just recent change
-- **Cleaner codebase** - Removed all legacy strategy code (continuous, event-driven)
-- **Enhanced trading prompts** - Clear rules about what stocks can be bought/sold/held
-- **1-minute interval data** - Download script configured for realistic 1-minute trading data
+**🚀 MAJOR UPDATE - Autonomous LLM Strategy (December 6):**
+- **🧠 Autonomous LLM activation** - LLM decides when to activate itself (no hardcoded triggers!)
+- **🔗 Chain-of-Thought reasoning** - LLM explains its thinking step-by-step before making decisions
+- **🔍 Self-reflection** - LLM critiques its own decisions to catch mistakes
+- **📊 Confidence scoring** - LLM only acts when confident (configurable threshold)
+- **🎯 ReAct pattern** - Modern AI technique combining reasoning and acting
+- **📈 Adaptive behavior** - LLM learns what market patterns are significant
+- **🗑️ Removed reactive strategy** - Eliminated all hardcoded trigger logic
+- **✨ Cleaner codebase** - Single autonomous strategy, no legacy code
+
+**Why This Matters:**
+Previous versions used hardcoded rules (e.g., "activate if price changes > 1.5%"). The new autonomous strategy lets the LLM decide what's important. This is a fundamental shift from rule-based to truly intelligent behavior.
+
+**Multi-Day Trading Support (December 5):**
+- **📅 Automatic multi-day data** - CSV appends new trading days automatically
+- **🔄 Live data updates** - Downloads fresh data every 60 seconds during market hours
+- **⏸️ Market hours awareness** - Waits for next trading day when market closes
+- **📊 Interactive charts** - Zoom, pan, and explore all historical data
+- **🔁 Continuous operation** - Can run indefinitely across multiple trading days
+
+**Real Data Integration (December 2):**
+- **Real stock data support** - Download actual historical intraday data from Yahoo Finance
+- **Fixed portfolio tracking** - Positions display correctly with accurate P/L calculations
+- **Improved LLM context** - Portfolio status appears at TOP of prompts (critical info first)
+- **Better percentage tracking** - Live prices show total change from start
+- **1-minute interval data** - Realistic minute-by-minute trading data
 
 **Major Frontend Overhaul (November):**
 - **Replaced Streamlit with Flask** - No more page reloads!
-- **Real-time updates via Server-Sent Events (SSE)** - True live streaming
+- **Real-time updates via SSE** - True live streaming
 - **Modern UI with Tailwind CSS** - Clean, professional design
-- **Live-updating charts with Chart.js** - Smooth animations, no flickering
+- **Live-updating charts** - Smooth animations, no flickering
 - **Portfolio tracking** - Virtual trading with LLM-driven decisions
 - **Batch data processing** - LLM sees all 4 stocks simultaneously
-- **Reactive strategy improvements** - LLM only responds to significant events
-- **Fixed price volatility** - Realistic 0.1% changes per second
-- **Persistent portfolio** - No more resets on page reload
-
-**Why Flask?**
-Streamlit's constant page reloads were frustrating and inefficient. The new Flask interface provides true real-time updates without any page refreshes, making the experience much smoother and more professional.
 
 ## Table of Contents
 
@@ -455,110 +467,346 @@ This allows easy swapping between memory strategies without changing strategy co
 
 ## Prompting Strategies
 
-### 1. Reactive Strategy (RECOMMENDED)
+### Autonomous Strategy (Current Implementation)
 
-**How it works:**
-- LLM sees ALL incoming data (stored in memory)
-- Only generates responses when something important is detected
-- Configurable triggers determine when to respond
-- Solves the continuous prompting problem elegantly
+**🧠 The Problem We Solved:**
 
-**Why it's better:**
-- Saves tokens (only responds when necessary)
-- Reduces latency (no constant LLM calls)
-- More useful output (alerts instead of constant commentary)
-- Maintains full context (all data stored in memory)
-- Practical for real-world use
+Traditional approaches use **hardcoded rules** to decide when the LLM should respond:
+- "Activate if price changes > 1.5%"
+- "Activate if volume > 2x average"
+- "Activate every 60 seconds"
 
-**Configuration:**
+**The issue?** These rules are arbitrary. What's "significant" changes based on:
+- Market conditions (volatile vs stable)
+- Stock characteristics (tech vs utilities)
+- Time of day (market open vs close)
+- Recent context (already trending vs sudden move)
+
+**Our Solution: Let the LLM Decide**
+
+Instead of hardcoded rules, we ask the LLM itself: **"Is this market state worth analyzing?"**
+
+The LLM considers:
+- Current price movements across all stocks
+- Recent market activity (last 10 data points)
+- Current market volatility
+- Whether this is just noise or a real signal
+
+This is **fundamentally different** from rule-based systems. The LLM learns what's important through its training, not through our arbitrary thresholds.
+
+---
+
+### How It Works
+
+#### 1. **Self-Activation (Tool Use Pattern)**
+
+Every 5 data points, we ask the LLM:
+
+```
+You are monitoring live market data. Should you activate and analyze?
+
+CURRENT MARKET STATE:
+AAPL: $278.50 (+2.1%) Vol: 77,980
+GOOGL: $320.40 (+0.5%) Vol: 45,230
+MSFT: $481.85 (+0.1%) Vol: 32,100
+TSLA: $454.66 (-0.1%) Vol: 51,200
+
+RECENT ACTIVITY (last 10 data points):
+[9:35] AAPL: $275.20 (+0.8%), GOOGL: $320.10 (+0.3%)...
+[9:36] AAPL: $276.40 (+1.2%), GOOGL: $320.25 (+0.4%)...
+...
+
+MARKET VOLATILITY: 0.0142
+
+Should you activate? Respond in JSON:
+{
+  "should_activate": true/false,
+  "reason": "brief explanation",
+  "confidence": 0.0-1.0
+}
+```
+
+**Why this works:**
+- LLM sees the full context, not just isolated metrics
+- LLM can recognize complex patterns (e.g., "AAPL momentum with volume confirmation")
+- LLM adapts to market conditions (what's significant in volatile vs calm markets)
+- Confidence scoring prevents false positives
+
+**Example LLM response:**
+```json
+{
+  "should_activate": true,
+  "reason": "AAPL showing strong upward momentum (+2.1%) with 2.3x normal volume - potential breakout",
+  "confidence": 0.88
+}
+```
+
+Only activates if `confidence >= 0.7` (configurable).
+
+---
+
+#### 2. **Chain-of-Thought Reasoning (CoT)**
+
+**Why we use it:**
+Research shows LLMs make significantly better decisions when they "think out loud" step-by-step, rather than jumping directly to conclusions.
+
+When activated, the LLM follows a structured reasoning process:
+
+```
+STEP 1 - OBSERVATION:
+What do you observe in the current market data? List specific facts.
+
+STEP 2 - PATTERN RECOGNITION:
+Are there any patterns, trends, or anomalies?
+
+STEP 3 - OPPORTUNITY IDENTIFICATION:
+Based on your observations, are there trading opportunities?
+
+STEP 4 - RISK ASSESSMENT:
+What are the risks of each potential action?
+
+STEP 5 - DECISION:
+Make your final trading decision(s).
+```
+
+**Example LLM response:**
+```
+OBSERVATION:
+- AAPL: $278.50 (+2.1%) with 77,980 volume (2.3x average)
+- Other stocks relatively flat (+0.5% or less)
+- AAPL has been climbing steadily for last 6 data points
+
+PATTERNS:
+- AAPL showing sustained upward momentum, not just a spike
+- Volume confirms genuine buying interest, not just price noise
+- Other stocks stable - AAPL-specific catalyst likely
+
+OPPORTUNITIES:
+- BUY AAPL - Momentum + volume suggests continuation
+- HOLD others - No clear signals
+
+RISKS:
+- Already up 2.1% - might be late to the move
+- Could be false breakout if volume drops
+- Confidence: 75%
+
+DECISION: BUY AAPL $500
+```
+
+**Why this is better than direct prompting:**
+- Forces systematic analysis (prevents impulsive decisions)
+- Makes reasoning transparent (you can see WHY it decided)
+- Catches logical errors (if reasoning is flawed, decision likely is too)
+- Improves decision quality (proven by research: [Chain-of-Thought Prompting](https://arxiv.org/abs/2201.11903))
+
+---
+
+#### 3. **Self-Reflection (Verification)**
+
+**Why we use it:**
+Even with CoT, LLMs can make mistakes. Self-reflection adds a verification layer where the LLM critiques its own decision.
+
+After making a decision, we ask:
+
+```
+You just decided to BUY AAPL $500. Now critique your own decision:
+
+1. SANITY CHECK:
+   - Do you have enough cash? (Current: $1,000)
+   - Did you verify the stock is actually moving up?
+   - Is this based on solid reasoning or emotion?
+
+2. RISK ASSESSMENT:
+   - What's the worst-case scenario?
+   - Is the reward worth the risk?
+
+3. ALTERNATIVE PERSPECTIVES:
+   - What would a contrarian investor say?
+   - Are you missing any information?
+
+4. FINAL VERDICT:
+   - Stand by your decision? (YES/NO)
+   - If NO, what should you do instead?
+```
+
+**Example LLM response:**
+```
+REFLECTION:
+
+SANITY CHECK:
+✓ Cash available: $1,000
+✓ $500 < $1,000 - can afford
+✓ AAPL is up 2.1% with high volume - solid technical signal
+✓ Decision based on momentum + volume confirmation
+
+RISK ASSESSMENT:
+- Worst case: AAPL reverses, lose ~$50 (10% drop)
+- Best case: Continues up, gain ~$100 (20% gain)
+- Risk/reward ratio: 1:2 - acceptable
+
+ALTERNATIVE PERSPECTIVES:
+- Contrarian view: "Already up 2.1%, too late to enter"
+- Counter-argument: Volume confirms this is early in the move, not late
+- Missing info: None critical - have price, volume, recent history
+
+FINAL VERDICT: CONFIRMED
+CONFIDENCE: 75%
+```
+
+**Why this works:**
+- Catches mistakes before execution (e.g., trying to buy without cash)
+- Provides second opinion (reduces overconfidence)
+- Can revise decisions if flaws found
+- Improves decision quality (proven by research: [Self-Consistency](https://arxiv.org/abs/2203.11171))
+
+---
+
+#### 4. **ReAct Pattern (Reasoning + Acting)**
+
+The strategy follows the ReAct framework ([paper](https://arxiv.org/abs/2210.03629)):
+
+1. **Observe** → Monitor market data silently
+2. **Reason** → Decide if activation needed (self-activation)
+3. **Act** → Perform analysis if activated (Chain-of-Thought)
+4. **Reflect** → Verify decision quality (self-reflection)
+5. **Execute** → Make trades only if verified
+
+This creates a **reasoning loop** where the LLM continuously evaluates and adapts.
+
+---
+
+### Configuration
+
 ```yaml
 strategy:
-  type: "reactive"
-  reactive:
-    check_interval: 1        # Check triggers every N data points
-    alert_cooldown: 60       # Minimum seconds between alerts for same symbol
-    triggers:
-      - type: "price_change"
-        threshold: 0.03      # 3% price change triggers alert
-      - type: "volume_spike"
-        threshold: 2.5       # 2.5x average volume triggers alert
-      - type: "news_event"   # Any news event triggers alert
-      - type: "pattern"
-        pattern_type: "consecutive_moves"
-        count: 3             # 3 consecutive moves in same direction
-      - type: "time_interval"
-        interval: 300        # Periodic check-in every 300 data points
+  type: "autonomous"
+
+  autonomous:
+    # How often to ask LLM if it wants to activate
+    # Lower = more frequent checks, Higher = more selective
+    activation_check_interval: 5
+
+    # Minimum confidence (0.0-1.0) required to activate
+    # Higher = more selective, Lower = more responsive
+    min_confidence_threshold: 0.7
+
+    # Enable Chain-of-Thought reasoning
+    # Dramatically improves decision quality
+    enable_chain_of_thought: true
+
+    # Enable self-reflection
+    # LLM critiques its own decisions
+    enable_self_reflection: true
+
+    # Enable trading
+    enable_trading: true
 ```
 
-**Trigger types:**
-- **price_change**: Significant price movement (e.g., 3% change)
-- **volume_spike**: Volume exceeds threshold times average (e.g., 2.5x)
-- **news_event**: Any news event (earnings, product, regulatory, etc.)
-- **pattern**: Detects patterns like consecutive moves in same direction
-- **time_interval**: Periodic check-ins every N data points
+**Tuning Guide:**
 
-**Use cases:**
-- Real-world trading alerts
-- Anomaly detection
-- Event-driven analysis
-- Cost-effective continuous monitoring
+| Parameter | Conservative | Balanced | Aggressive |
+|-----------|-------------|----------|------------|
+| `activation_check_interval` | 10 | 5 | 3 |
+| `min_confidence_threshold` | 0.8 | 0.7 | 0.6 |
+| `enable_chain_of_thought` | true | true | true |
+| `enable_self_reflection` | true | true | false* |
 
-**Token usage:** Low to medium (only on triggered events)
+*Aggressive mode can skip reflection for faster execution
 
-**Example output:**
+---
+
+### Why These Techniques Matter
+
+**1. Self-Activation (vs Hardcoded Triggers)**
+- ❌ Hardcoded: "Activate if price > 1.5%" → Misses context
+- ✅ Autonomous: LLM considers full market state → Adapts to conditions
+
+**2. Chain-of-Thought (vs Direct Prompting)**
+- ❌ Direct: "Should I buy AAPL?" → Impulsive decision
+- ✅ CoT: Step-by-step reasoning → Systematic analysis
+
+**3. Self-Reflection (vs Single-Pass)**
+- ❌ Single-pass: Make decision, execute → No verification
+- ✅ Reflection: Make decision, critique, then execute → Catches mistakes
+
+**These aren't just "nice to have" features** - they're proven techniques from AI research that measurably improve decision quality.
+
+---
+
+### Example: Full Autonomous Flow
+
 ```
-ALERT: NEWS EVENT DETECTED
+[Data Point 1-4] → Stored silently
+[Data Point 5] → Self-Activation Check
 
-Current Data:
-Symbol: AAPL
-Headline: AAPL beats earnings expectations by 15%
-Sentiment: POSITIVE
-Impact: HIGH
+LLM: {
+  "should_activate": true,
+  "reason": "AAPL up 2.1% with high volume",
+  "confidence": 0.88
+}
 
-Trigger Details:
-  headline: AAPL beats earnings expectations by 15%
-  sentiment: positive
-  impact: high
+✓ Confidence 0.88 >= 0.70 → ACTIVATE
 
-Please analyze this situation and provide:
-1. What is happening and why it's significant
-2. Potential implications for the stock
-3. Recommended action or monitoring focus
+--- CHAIN-OF-THOUGHT ANALYSIS ---
+
+OBSERVATION:
+- AAPL: $278.50 (+2.1%) Vol: 77,980
+- Volume 2.3x higher than average
+- Sustained climb over last 6 data points
+
+PATTERNS:
+- Strong upward momentum with volume confirmation
+- Other stocks flat - AAPL-specific move
+
+OPPORTUNITIES:
+- BUY AAPL - Momentum likely to continue
+
+RISKS:
+- Could reverse if volume drops
+- Already up 2.1% - might be late
+
+CONFIDENCE: 75%
+DECISION: BUY AAPL $500
+
+--- SELF-REFLECTION ---
+
+SANITY CHECK:
+✓ Have $1,000 cash, buying $500 - OK
+✓ Based on solid technical signals
+
+RISK ASSESSMENT:
+- Risk/reward: 1:2 - acceptable
+
+FINAL VERDICT: CONFIRMED
+
+✓ Trade Executed: BUY $500 AAPL @ $278.50
 ```
 
-### 2. Legacy Strategies (Removed)
+**This entire reasoning process appears in the frontend** so you can see exactly why the LLM made each decision.
 
-**Note:** The continuous and event-driven strategies have been removed to simplify the codebase. The reactive strategy is the only supported strategy and is recommended for all use cases.
+---
 
-**Why reactive only?**
-- More practical for real-world use
-- Better token efficiency
-- Cleaner codebase to maintain
-- Easier to understand and modify
-- Handles all use cases effectively
+### Legacy Strategies (Removed)
 
-If you need continuous processing, you can modify the reactive strategy's triggers to fire on every data point
-      - type: "time_interval"
-        seconds: 60          # Every 60 seconds
-```
+**Reactive Strategy** (removed December 6, 2025):
+- Used hardcoded triggers (price change > 1.5%, volume > 2x, etc.)
+- Could not adapt to market conditions
+- No reasoning transparency
+- No self-verification
 
-**Use cases:**
-- Cost-sensitive applications
-- Focus on significant market movements
-- Alert-based systems
-- Lower-frequency analysis
+**Why we removed it:**
+- Autonomous strategy is strictly superior
+- Simpler codebase (one strategy vs multiple)
+- Better decision quality
+- More transparent reasoning
+- Truly intelligent behavior vs rule-following
 
-**Token usage:** Low to medium (only on events)
+If you need the old reactive strategy, check git history before December 6, 2025
+---
 
-**Trigger types:**
-- **price_change**: Triggers when price changes by threshold percentage
-- **volume_spike**: Triggers when volume exceeds threshold times average
-- **time_interval**: Triggers at regular time intervals
-- **custom**: Implement your own trigger logic
+### Custom Strategy Development
 
-### 4. Custom Strategy
-
-Extend `BaseStrategy` to implement your own logic:
+You can extend `BaseStrategy` to implement your own logic:
 
 ```python
 from src.strategies.base_strategy import BaseStrategy
@@ -575,18 +823,7 @@ class MyCustomStrategy(BaseStrategy):
         return None
 ```
 
-### Strategy Comparison
-
-| Feature | Reactive | Continuous | Event-Driven |
-|---------|----------|------------|--------------|
-| Sees all data | Yes | Yes | Yes |
-| Responds to all data | No (only important) | Yes | No (only events) |
-| Token usage | Low-Medium | High | Low-Medium |
-| Latency | Low | High | Low |
-| Memory management | Yes | Yes | Limited |
-| News event support | Yes | Yes | No |
-| Pattern detection | Yes | No | No |
-| Best for | Production use | Research/testing | Simple alerts |
+**Note:** The autonomous strategy is highly configurable and should handle most use cases. Only create a custom strategy if you need fundamentally different behavior.
 
 ## Web Interface
 

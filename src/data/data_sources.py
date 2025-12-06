@@ -173,6 +173,7 @@ class CSVDataSource(DataSource):
         try:
             import pandas as pd
             import os
+            from zoneinfo import ZoneInfo
 
             # Track file modification time
             if os.path.exists(self.csv_path):
@@ -183,6 +184,30 @@ class CSVDataSource(DataSource):
             # Filter by symbols if specified
             if self.symbols:
                 df = df[df['Symbol'].isin(self.symbols)]
+
+            # Convert timestamp column to datetime for filtering
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+            # Filter out future timestamps (Yahoo Finance sometimes includes incomplete bars)
+            try:
+                et_tz = ZoneInfo('America/New_York')
+                now_et = datetime.now(et_tz)
+            except Exception:
+                now_et = datetime.now()
+
+            # Make now_et timezone-naive if df timestamps are timezone-naive
+            if df['timestamp'].dt.tz is None and now_et.tzinfo is not None:
+                now_et = now_et.replace(tzinfo=None)
+            # Make df timestamps timezone-naive if now_et is timezone-naive
+            elif df['timestamp'].dt.tz is not None and now_et.tzinfo is None:
+                df['timestamp'] = df['timestamp'].dt.tz_localize(None)
+
+            # Filter out future data
+            original_count = len(df)
+            df = df[df['timestamp'] <= now_et]
+            filtered_count = original_count - len(df)
+            if filtered_count > 0:
+                logger.info(f"Filtered out {filtered_count} future data points")
 
             # Group data by timestamp
             self.data_by_timestamp = {}  # Clear existing data

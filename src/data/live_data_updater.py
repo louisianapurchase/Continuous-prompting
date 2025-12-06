@@ -215,6 +215,11 @@ def is_csv_up_to_date(csv_path, tolerance_minutes=2):
 
     logger.info(f"CSV last timestamp: {last_timestamp}, Current ET: {now_et}, Minutes behind: {minutes_behind:.1f}")
 
+    # If last_timestamp is in the future, CSV is NOT up to date (has stale future data)
+    if minutes_behind < 0:
+        logger.warning(f"CSV has future timestamps! Needs update.")
+        return False
+
     return minutes_behind <= tolerance_minutes
 
 

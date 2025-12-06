@@ -15,7 +15,7 @@ import sys
 from src.data import TradingDataSimulator, SampleDataSource, CSVDataSource
 from src.data.news_generator import NewsGenerator
 from src.llm import OllamaClient, PromptManager
-from src.strategies.reactive_strategy import ReactiveStrategy
+from src.strategies import AutonomousStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
 from src.portfolio import PortfolioManager
 from src.utils import setup_logger, MetricsTracker, TerminalDisplay, CompactDisplay
@@ -113,9 +113,12 @@ def create_strategy(config: dict, llm_client, prompt_manager, portfolio_manager=
     """
     # Only reactive strategy is supported
     memory_manager = create_memory_manager(config)
-    strategy_config = config['strategy'].get('reactive', {})
+
+    # Create autonomous strategy
+    strategy_config = config['strategy'].get('autonomous', {})
     strategy_config['memory'] = config.get('memory', {})
-    return ReactiveStrategy(llm_client, prompt_manager, strategy_config, memory_manager, portfolio_manager)
+    logger.info("Using Autonomous Strategy (LLM self-activation with Chain-of-Thought)")
+    return AutonomousStrategy(llm_client, prompt_manager, strategy_config, memory_manager, portfolio_manager)
 
 
 def main():

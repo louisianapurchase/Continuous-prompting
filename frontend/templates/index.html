@@ -375,8 +375,12 @@
 
         function updateStockPrices(batchData) {
             const stocks = batchData.stocks || [];
+
+            // Sort stocks alphabetically by symbol to maintain consistent order
+            const sortedStocks = [...stocks].sort((a, b) => a.symbol.localeCompare(b.symbol));
+
             let html = '';
-            stocks.forEach(stock => {
+            sortedStocks.forEach(stock => {
                 const changeClass = stock.change >= 0 ? 'price-up' : 'price-down';
                 const changeSymbol = stock.change >= 0 ? '+' : '';
                 html += `<div class="stock-row"><div><span class="font-bold text-lg">${stock.symbol}</span>

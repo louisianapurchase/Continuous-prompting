@@ -36,37 +36,28 @@ trading:
 
 # Prompting Strategy Configuration
 strategy:
-  type: "reactive"  # Options: continuous, event_driven, reactive
+  type: "autonomous"  # Autonomous strategy with LLM self-activation
 
-  # Continuous strategy settings
-  continuous:
-    batch_size: 1  # Number of data points before prompting
-    include_history: true
-    max_history_length: 10  # Number of previous data points to include
+  # Autonomous strategy settings
+  # LLM decides when to activate itself using modern AI techniques
+  autonomous:
+    # How often to ask the LLM if it wants to activate (lower = more frequent checks)
+    activation_check_interval: 5
 
-  # Event-driven strategy settings
-  event_driven:
-    triggers:
-      - type: "price_change"
-        threshold: 0.05  # 5% price change
-      - type: "volume_spike"
-        threshold: 2.0   # 2x average volume
-      - type: "time_interval"
-        interval: 10     # seconds
+    # Minimum confidence level (0.0-1.0) required for LLM to activate
+    # Higher = more selective, Lower = more responsive
+    min_confidence_threshold: 0.7
 
-  # Reactive strategy settings (RECOMMENDED)
-  # LLM only responds when significant events occur
-  reactive:
-    check_interval: 1        # Check triggers every N data points
-    alert_cooldown: 30       # Minimum 30 seconds between responses
-    triggers:
-      - type: "price_change"
-        threshold: 0.015     # 1.5% price change triggers response
-      - type: "volume_spike"
-        threshold: 1.5       # 1.5x average volume triggers response
-      - type: "news_event"   # News events always trigger response
-      - type: "time_interval"
-        interval: 60         # Check in every 60 data points (~30 seconds at 0.5s intervals)
+    # Enable Chain-of-Thought reasoning (step-by-step thinking)
+    # This dramatically improves decision quality by making the LLM explain its reasoning
+    enable_chain_of_thought: true
+
+    # Enable self-reflection (LLM critiques its own decisions)
+    # This catches mistakes before executing trades
+    enable_self_reflection: true
+
+    # Enable autonomous trading decisions
+    enable_trading: true
 
 # Memory Management Configuration
 memory:
