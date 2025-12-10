@@ -27,6 +27,12 @@ from src.strategies import AutonomousStrategy
 from src.memory import SlidingWindowMemoryManager, ChromaMemoryManager
 from src.portfolio import PortfolioManager
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # Set template folder explicitly to handle different import methods
@@ -254,7 +260,14 @@ def process_stream(strategy: AutonomousStrategy) -> None:
                             logger.error(f"Error processing strategy: {e}", exc_info=True)
 
                     # Submit to thread pool - don't wait for result
-                    executor.submit(process_strategy_async, data_point)
+                    try:
+                        executor.submit(process_strategy_async, data_point)
+                    except RuntimeError as e:
+                        # Executor is shutting down, skip this task
+                        if 'cannot schedule new futures' in str(e):
+                            logger.debug("Executor shutting down, skipping strategy processing")
+                        else:
+                            raise
 
                     # Send portfolio update
                     if portfolio_manager:
@@ -354,8 +367,12 @@ def stop_simulation() -> dict:
     Returns:
         JSON response with status
     """
-    global is_running, live_updater
+    global is_running, live_updater, stream_thread
     is_running = False
+
+    # Wait for stream thread to finish
+    if stream_thread and stream_thread.is_alive():
+        stream_thread.join(timeout=2.0)
 
     # Stop live updater if running
     if live_updater:
@@ -372,9 +389,14 @@ def reset_simulation() -> dict:
     Returns:
         JSON response with status
     """
-    global is_running, data_history, response_history, portfolio_manager, live_updater
+    global is_running, data_history, response_history, portfolio_manager, live_updater, stream_thread
 
     is_running = False
+
+    # Wait for stream thread to finish
+    if stream_thread and stream_thread.is_alive():
+        stream_thread.join(timeout=2.0)
+
     data_history.clear()
     response_history.clear()
     portfolio_manager = None

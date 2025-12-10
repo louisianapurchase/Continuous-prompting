@@ -4,25 +4,25 @@ An experimental framework for exploring continuous LLM prompting with streaming 
 
 ## Recent Updates (December 2025)
 
-**🚀 MAJOR UPDATE - Autonomous LLM Strategy (December 6):**
-- **🧠 Autonomous LLM activation** - LLM decides when to activate itself (no hardcoded triggers!)
-- **🔗 Chain-of-Thought reasoning** - LLM explains its thinking step-by-step before making decisions
-- **🔍 Self-reflection** - LLM critiques its own decisions to catch mistakes
-- **📊 Confidence scoring** - LLM only acts when confident (configurable threshold)
-- **🎯 ReAct pattern** - Modern AI technique combining reasoning and acting
-- **📈 Adaptive behavior** - LLM learns what market patterns are significant
-- **🗑️ Removed reactive strategy** - Eliminated all hardcoded trigger logic
-- **✨ Cleaner codebase** - Single autonomous strategy, no legacy code
+**MAJOR UPDATE - Autonomous LLM Strategy (December 6):**
+- **Autonomous LLM activation** - LLM decides when to activate itself (no hardcoded triggers!)
+- **Chain-of-Thought reasoning** - LLM explains its thinking step-by-step before making decisions
+- **Self-reflection** - LLM critiques its own decisions to catch mistakes
+- **Confidence scoring** - LLM only acts when confident (configurable threshold)
+- **ReAct pattern** - Modern AI technique combining reasoning and acting
+- **Adaptive behavior** - LLM learns what market patterns are significant
+- **Removed reactive strategy** - Eliminated all hardcoded trigger logic
+- **Cleaner codebase** - Single autonomous strategy, no legacy code
 
 **Why This Matters:**
 Previous versions used hardcoded rules (e.g., "activate if price changes > 1.5%"). The new autonomous strategy lets the LLM decide what's important. This is a fundamental shift from rule-based to truly intelligent behavior.
 
 **Multi-Day Trading Support (December 5):**
-- **📅 Automatic multi-day data** - CSV appends new trading days automatically
-- **🔄 Live data updates** - Downloads fresh data every 60 seconds during market hours
-- **⏸️ Market hours awareness** - Waits for next trading day when market closes
-- **📊 Interactive charts** - Zoom, pan, and explore all historical data
-- **🔁 Continuous operation** - Can run indefinitely across multiple trading days
+- **Automatic multi-day data** - CSV appends new trading days automatically
+- **Live data updates** - Downloads fresh data every 60 seconds during market hours
+- **Market hours awareness** - Waits for next trading day when market closes
+- **Interactive charts** - Zoom, pan, and explore all historical data
+- **Continuous operation** - Can run indefinitely across multiple trading days
 
 **Real Data Integration (December 2):**
 - **Real stock data support** - Download actual historical intraday data from Yahoo Finance
@@ -469,7 +469,7 @@ This allows easy swapping between memory strategies without changing strategy co
 
 ### Autonomous Strategy (Current Implementation)
 
-**🧠 The Problem We Solved:**
+**The Problem We Solved:**
 
 Traditional approaches use **hardcoded rules** to decide when the LLM should respond:
 - "Activate if price changes > 1.5%"
@@ -634,10 +634,10 @@ You just decided to BUY AAPL $500. Now critique your own decision:
 REFLECTION:
 
 SANITY CHECK:
-✓ Cash available: $1,000
-✓ $500 < $1,000 - can afford
-✓ AAPL is up 2.1% with high volume - solid technical signal
-✓ Decision based on momentum + volume confirmation
+- Cash available: $1,000
+- $500 < $1,000 - can afford
+- AAPL is up 2.1% with high volume - solid technical signal
+- Decision based on momentum + volume confirmation
 
 RISK ASSESSMENT:
 - Worst case: AAPL reverses, lose ~$50 (10% drop)
@@ -718,16 +718,16 @@ strategy:
 ### Why These Techniques Matter
 
 **1. Self-Activation (vs Hardcoded Triggers)**
-- ❌ Hardcoded: "Activate if price > 1.5%" → Misses context
-- ✅ Autonomous: LLM considers full market state → Adapts to conditions
+- Hardcoded: "Activate if price > 1.5%" → Misses context
+- Autonomous: LLM considers full market state → Adapts to conditions
 
 **2. Chain-of-Thought (vs Direct Prompting)**
-- ❌ Direct: "Should I buy AAPL?" → Impulsive decision
-- ✅ CoT: Step-by-step reasoning → Systematic analysis
+- Direct: "Should I buy AAPL?" → Impulsive decision
+- CoT: Step-by-step reasoning → Systematic analysis
 
 **3. Self-Reflection (vs Single-Pass)**
-- ❌ Single-pass: Make decision, execute → No verification
-- ✅ Reflection: Make decision, critique, then execute → Catches mistakes
+- Single-pass: Make decision, execute → No verification
+- Reflection: Make decision, critique, then execute → Catches mistakes
 
 **These aren't just "nice to have" features** - they're proven techniques from AI research that measurably improve decision quality.
 
@@ -745,7 +745,7 @@ LLM: {
   "confidence": 0.88
 }
 
-✓ Confidence 0.88 >= 0.70 → ACTIVATE
+Confidence 0.88 >= 0.70 → ACTIVATE
 
 --- CHAIN-OF-THOUGHT ANALYSIS ---
 
@@ -771,15 +771,15 @@ DECISION: BUY AAPL $500
 --- SELF-REFLECTION ---
 
 SANITY CHECK:
-✓ Have $1,000 cash, buying $500 - OK
-✓ Based on solid technical signals
+- Have $1,000 cash, buying $500 - OK
+- Based on solid technical signals
 
 RISK ASSESSMENT:
 - Risk/reward: 1:2 - acceptable
 
 FINAL VERDICT: CONFIRMED
 
-✓ Trade Executed: BUY $500 AAPL @ $278.50
+Trade Executed: BUY $500 AAPL @ $278.50
 ```
 
 **This entire reasoning process appears in the frontend** so you can see exactly why the LLM made each decision.
@@ -1553,10 +1553,10 @@ python run.py
 ```
 
 **That's it!** The app will:
-- ✅ Automatically download data if the CSV doesn't exist
-- ✅ Automatically download fresh data if the CSV is from a previous day
-- ✅ **During market hours**: Update the CSV every 60 seconds with new data
-- ✅ **After market hours**: Use the complete day's data (no updates needed)
+- Automatically download data if the CSV doesn't exist
+- Automatically download fresh data if the CSV is from a previous day
+- **During market hours**: Update the CSV every 60 seconds with new data
+- **After market hours**: Use the complete day's data (no updates needed)
 
 **Manual Download (Optional):**
 
@@ -1697,11 +1697,11 @@ data:
 
 ### Benefits of Real Data
 
-✅ **Realistic testing** - See how your LLM responds to real market conditions
-✅ **Reproducible** - Same data every time you run it
-✅ **Historical events** - Includes real news events, earnings, etc.
-✅ **Accurate patterns** - Real support/resistance levels, trends, volatility
-✅ **Better training** - Helps tune your LLM prompts and triggers
+- **Realistic testing** - See how your LLM responds to real market conditions
+- **Reproducible** - Same data every time you run it
+- **Historical events** - Includes real news events, earnings, etc.
+- **Accurate patterns** - Real support/resistance levels, trends, volatility
+- **Better training** - Helps tune your LLM prompts and triggers
 
 ---
 

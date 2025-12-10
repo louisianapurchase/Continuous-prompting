@@ -189,17 +189,18 @@ class CSVDataSource(DataSource):
             df['timestamp'] = pd.to_datetime(df['timestamp'])
 
             # Filter out future timestamps (Yahoo Finance sometimes includes incomplete bars)
+            # CSV timestamps should be timezone-naive and in Eastern Time
             try:
                 et_tz = ZoneInfo('America/New_York')
                 now_et = datetime.now(et_tz)
+                # Make timezone-naive for comparison (CSV is in ET, timezone-naive)
+                now_et = now_et.replace(tzinfo=None)
             except Exception:
                 now_et = datetime.now()
 
-            # Make now_et timezone-naive if df timestamps are timezone-naive
-            if df['timestamp'].dt.tz is None and now_et.tzinfo is not None:
-                now_et = now_et.replace(tzinfo=None)
-            # Make df timestamps timezone-naive if now_et is timezone-naive
-            elif df['timestamp'].dt.tz is not None and now_et.tzinfo is None:
+            # Ensure df timestamps are timezone-naive
+            if df['timestamp'].dt.tz is not None:
+                logger.warning("CSV timestamps have timezone info, converting to timezone-naive ET")
                 df['timestamp'] = df['timestamp'].dt.tz_localize(None)
 
             # Filter out future data
@@ -207,7 +208,7 @@ class CSVDataSource(DataSource):
             df = df[df['timestamp'] <= now_et]
             filtered_count = original_count - len(df)
             if filtered_count > 0:
-                logger.info(f"Filtered out {filtered_count} future data points")
+                logger.info(f"Filtered out {filtered_count} future data points (comparing to ET: {now_et})")
 
             # Group data by timestamp
             self.data_by_timestamp = {}  # Clear existing data
@@ -236,11 +237,13 @@ class CSVDataSource(DataSource):
                 logger.info(f"Time range: {self.timestamps[0]} to {self.timestamps[-1]}")
 
         except FileNotFoundError:
-            logger.warning(
-                f"CSV file not found: {self.csv_path}. Using empty dataset."
+            raise FileNotFoundError(
+                f"CSV file not found: {self.csv_path}\n"
+                f"Either:\n"
+                f"1. Download data: python scripts/download_real_data.py\n"
+                f"2. Switch to simulated data in config.yaml: data.source = 'sample'\n"
+                f"3. Check that the csv_path in config.yaml is correct"
             )
-            self.data_by_timestamp = {}
-            self.timestamps = []
 
     def reload_if_modified(self) -> bool:
         """
@@ -258,9 +261,19 @@ class CSVDataSource(DataSource):
             if self.last_file_mtime is None or current_mtime > self.last_file_mtime:
                 logger.info(f"CSV file modified. Reloading data from {self.csv_path}")
                 old_index = self.current_index
+                old_timestamp_count = len(self.timestamps)
                 self._load_data()
-                # Keep current position if possible
-                self.current_index = min(old_index, len(self.timestamps) - 1)
+
+                # If we got new data, continue from where we were
+                # Don't reset to beginning - that would replay old data
+                if len(self.timestamps) > old_timestamp_count:
+                    logger.info(f"New data added: {len(self.timestamps) - old_timestamp_count} new timestamps")
+                    # Continue from where we were
+                    self.current_index = old_index
+                else:
+                    # No new data, just keep position
+                    self.current_index = min(old_index, len(self.timestamps) - 1)
+
                 return True
             return False
         except Exception as e:
@@ -294,7 +307,7 @@ class CSVDataSource(DataSource):
         # Return batch format (same as SampleDataSource)
         return {
             'type': 'batch',
-            'timestamp': timestamp,
+            'timestamp': str(timestamp),  # Convert pandas Timestamp to string for JSON serialization
             'stocks': stocks_data
         }
 

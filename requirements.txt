@@ -22,7 +22,7 @@ sentence-transformers>=2.2.0
 # Web Interface
 flask>=3.0.0
 
-# Optional: For future API data sources
-# yfinance>=0.2.0
-# alpaca-trade-api>=3.0.0
+
+yfinance>=0.2.0
+
 

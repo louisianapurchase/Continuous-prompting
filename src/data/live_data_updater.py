@@ -21,7 +21,7 @@ try:
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
-    logger.warning("yfinance not installed. Real-time data updates disabled.")
+    # Don't log here - we'll raise an error when actually trying to use it
 
 
 def is_market_hours() -> bool:
@@ -69,10 +69,16 @@ def download_stock_data(symbols, interval='1m', period='1d', csv_path='data/raw/
 
     Returns:
         True if successful, False otherwise
+
+    Raises:
+        ImportError: If yfinance is not installed
     """
     if not YFINANCE_AVAILABLE:
-        logger.error("yfinance not installed. Cannot download data.")
-        return False
+        raise ImportError(
+            "yfinance is not installed. Cannot download real stock data.\n"
+            "Install it with: pip install yfinance\n"
+            "Or switch to simulated data in config.yaml: data.source = 'sample'"
+        )
 
     try:
         logger.info(f"Downloading {interval} data for {symbols} (append={append_mode})...")
@@ -82,17 +88,17 @@ def download_stock_data(symbols, interval='1m', period='1d', csv_path='data/raw/
         for symbol in symbols:
             ticker = yf.Ticker(symbol)
             df = ticker.history(period=period, interval=interval)
-            
+
             if df.empty:
                 logger.warning(f"No data returned for {symbol}")
                 continue
-            
+
             # Add symbol column
             df['Symbol'] = symbol
-            
+
             # Reset index to make timestamp a column
             df.reset_index(inplace=True)
-            
+
             # Rename columns
             df.rename(columns={
                 'Datetime': 'timestamp',
@@ -102,6 +108,19 @@ def download_stock_data(symbols, interval='1m', period='1d', csv_path='data/raw/
                 'Close': 'price',
                 'Volume': 'volume'
             }, inplace=True)
+
+            # Convert timestamps to Eastern Time (market timezone)
+            from zoneinfo import ZoneInfo
+            et_tz = ZoneInfo('America/New_York')
+
+            # Yahoo Finance returns timezone-aware timestamps (usually UTC or ET)
+            # Convert to ET and then make timezone-naive for consistency
+            if df['timestamp'].dt.tz is not None:
+                df['timestamp'] = df['timestamp'].dt.tz_convert(et_tz).dt.tz_localize(None)
+            else:
+                # If no timezone, assume it's already ET
+                logger.warning(f"Timestamps for {symbol} have no timezone info, assuming ET")
+                pass
             
             # Calculate percentage change from first price
             first_price = df['price'].iloc[0]
@@ -135,6 +154,7 @@ def download_stock_data(symbols, interval='1m', period='1d', csv_path='data/raw/
             combined_df = pd.concat([existing_df, combined_df], ignore_index=True)
 
             # Remove duplicates (same timestamp + symbol)
+            # Parse timestamps as timezone-naive (they're already in ET from above)
             combined_df['timestamp'] = pd.to_datetime(combined_df['timestamp'])
             combined_df = combined_df.drop_duplicates(subset=['timestamp', 'Symbol'], keep='last')
 
@@ -148,10 +168,10 @@ def download_stock_data(symbols, interval='1m', period='1d', csv_path='data/raw/
 
         logger.info(f"Saved {len(combined_df)} data points to {csv_path}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Error downloading data: {e}", exc_info=True)
-        return False
+        raise RuntimeError(f"Failed to download stock data: {e}") from e
 
 
 def get_csv_last_timestamp(csv_path):
@@ -236,22 +256,27 @@ def ensure_data_available(symbols, csv_path='data/raw/real_trading_data_1m_1d.cs
         symbols: List of stock symbols
         csv_path: Path to CSV file
 
-    Returns:
-        True if data is available, False otherwise
+    Raises:
+        ImportError: If yfinance is not installed and data needs to be downloaded
+        FileNotFoundError: If CSV doesn't exist and can't be downloaded
     """
     csv_file = Path(csv_path)
 
     # If file doesn't exist, download it
     if not csv_file.exists():
-        logger.info(f"CSV file not found. Downloading data...")
-        return download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+        logger.info(f"CSV file not found at {csv_path}. Attempting to download...")
+        download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+        return
 
     # Check if CSV has today's data
     try:
         last_timestamp = get_csv_last_timestamp(csv_path)
         if last_timestamp is None:
             logger.warning("Could not read CSV timestamp. Re-downloading...")
-            return download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+            success = download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+            if not success:
+                raise RuntimeError(f"Failed to download data to {csv_path}")
+            return
 
         # Convert to Eastern Time for comparison
         from zoneinfo import ZoneInfo
@@ -267,15 +292,20 @@ def ensure_data_available(symbols, csv_path='data/raw/real_trading_data_1m_1d.cs
         # Check if last data is from today
         if last_timestamp.date() == now_et.date():
             logger.info(f"CSV has today's data (last: {last_timestamp}). Using existing file.")
-            return True
+            return
         else:
             logger.info(f"CSV last data is from {last_timestamp.date()}. Appending today's data...")
-            return download_stock_data(symbols, csv_path=csv_path, append_mode=True)
+            success = download_stock_data(symbols, csv_path=csv_path, append_mode=True)
+            if not success:
+                logger.warning(f"Failed to append new data. Using existing data from {last_timestamp.date()}")
+            return
 
     except Exception as e:
         logger.error(f"Error checking CSV data: {e}", exc_info=True)
         logger.info("Re-downloading data...")
-        return download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+        success = download_stock_data(symbols, csv_path=csv_path, append_mode=False)
+        if not success:
+            raise RuntimeError(f"Failed to download data to {csv_path}") from e
 
 
 class LiveDataUpdater:
@@ -306,10 +336,18 @@ class LiveDataUpdater:
         self.thread = None
 
     def start(self):
-        """Start the background update thread."""
+        """
+        Start the background update thread.
+
+        Raises:
+            ImportError: If yfinance is not installed
+        """
         if not YFINANCE_AVAILABLE:
-            logger.warning("yfinance not available. Live updates disabled.")
-            return
+            raise ImportError(
+                "yfinance is not installed. Cannot start live data updater.\n"
+                "Install it with: pip install yfinance\n"
+                "Or switch to simulated data in config.yaml: data.source = 'sample'"
+            )
 
         if self.running:
             logger.warning("Live updater already running")

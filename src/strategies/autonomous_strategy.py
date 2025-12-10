@@ -131,21 +131,25 @@ class AutonomousStrategy(BaseStrategy):
             # Check if we should ask LLM if it wants to activate
             if self.data_points_since_check >= self.activation_check_interval:
                 self.data_points_since_check = 0
-                
+
+                logger.info(f"Checking if LLM wants to activate (total data points processed: {len(self.data_history)})")
+
                 # Ask LLM: "Should I activate and analyze this?"
                 should_activate, activation_reason = self._check_activation(data, stocks)
-                
+
                 if should_activate:
-                    logger.info(f"LLM activated itself: {activation_reason}")
-                    
+                    logger.info(f"✓ LLM ACTIVATED: {activation_reason}")
+
                     # LLM decided to activate - perform full analysis
                     response = self._perform_autonomous_analysis(data, stocks, activation_reason)
-                    
+
                     # Store in memory with response
                     self.memory_manager.add_data_point(data, response)
-                    
+
                     return response
-            
+                else:
+                    logger.debug(f"LLM chose not to activate (reason: {activation_reason if activation_reason else 'normal market conditions'})")
+
             return None
 
         return None
@@ -204,6 +208,8 @@ Be selective - only activate when you see something genuinely interesting or act
                 maintain_history=False
             )
 
+            logger.debug(f"LLM activation check response: {response[:200]}...")
+
             # Parse JSON response
             result = self._parse_json_response(response)
 
@@ -211,17 +217,21 @@ Be selective - only activate when you see something genuinely interesting or act
                 confidence = result.get('confidence', 0.0)
                 reason = result.get('reason', 'No reason provided')
 
+                logger.info(f"LLM wants to activate: confidence={confidence:.2f}, reason='{reason}'")
+
                 # Only activate if confidence is high enough
                 if confidence >= self.min_confidence_threshold:
                     return True, reason
                 else:
-                    logger.debug(f"LLM wants to activate but confidence too low: {confidence:.2f}")
+                    logger.info(f"Activation blocked: confidence {confidence:.2f} < threshold {self.min_confidence_threshold}")
                     return False, ""
+            else:
+                logger.debug(f"LLM chose not to activate. Response: {result}")
 
             return False, ""
 
         except Exception as e:
-            logger.error(f"Error in activation check: {e}")
+            logger.error(f"Error in activation check: {e}", exc_info=True)
             return False, ""
 
     def _perform_autonomous_analysis(
@@ -325,6 +335,9 @@ YOUR PORTFOLIO:
 ═══════════════════════════════════════════════════════════════
 {portfolio_status}
 
+IMPORTANT: Check "Cash Available for Trading" above. If you have cash, you CAN buy stocks.
+If "Current Holdings" shows "None", you have NO positions and are 100% cash.
+
 ═══════════════════════════════════════════════════════════════
 HISTORICAL CONTEXT:
 ═══════════════════════════════════════════════════════════════
@@ -342,9 +355,9 @@ Are there any patterns, trends, or anomalies? Compare to historical context.
 
 STEP 3 - OPPORTUNITY IDENTIFICATION:
 Based on your observations, are there any trading opportunities?
-- Which stocks look attractive to BUY?
-- Which positions should you SELL?
-- Which positions should you HOLD?
+- Which stocks look attractive to BUY? (You can only BUY if you have cash available)
+- Which positions should you SELL? (You can only SELL stocks you currently hold)
+- Which positions should you HOLD? (Only applies to stocks you currently own)
 
 STEP 4 - RISK ASSESSMENT:
 What are the risks of each potential action?
@@ -369,11 +382,18 @@ RISKS:
 [Risk assessment]
 
 CONFIDENCE: [0-100%]
+⚠ IMPORTANT: Your trades will ONLY execute if confidence >= 70%
+If you're not confident enough, your decisions will be blocked for safety.
 
-DECISION: [BUY/SELL/HOLD] [SYMBOL] $[AMOUNT]
+DECISION: [BUY/SELL/HOLD] [SYMBOL] $[AMOUNT_TO_INVEST]
 (You can make multiple decisions, one per line)
 
-Example:
+IMPORTANT: $[AMOUNT_TO_INVEST] is how much MONEY you want to spend, NOT the stock price!
+- To invest $500 in AAPL: "DECISION: BUY AAPL $500"
+- To invest all your cash: Use the exact "Cash Available for Trading" amount shown above
+- To sell $200 worth: "DECISION: SELL MSFT $200"
+
+Examples:
 DECISION: BUY AAPL $500
 DECISION: SELL MSFT $200
 DECISION: HOLD GOOGL
@@ -411,7 +431,11 @@ HISTORICAL CONTEXT:
 
 Analyze the situation and make trading decisions.
 
-DECISION: [BUY/SELL/HOLD] [SYMBOL] $[AMOUNT]
+FORMAT:
+DECISION: [BUY/SELL/HOLD] [SYMBOL] $[AMOUNT_TO_INVEST]
+
+IMPORTANT: $[AMOUNT_TO_INVEST] is how much MONEY you want to spend, NOT the stock price!
+Example: "DECISION: BUY AAPL $500" means invest $500 in AAPL (not buy at $500/share)
 """
 
     def _perform_self_reflection(
@@ -475,8 +499,10 @@ YOUR PORTFOLIO (for reference):
 Respond with:
 REFLECTION: [Your self-critique]
 FINAL_DECISION: [CONFIRMED/REVISED]
-REVISED_DECISION: [Only if you changed your mind]
+REVISED_DECISION: [Only if you changed your mind - use format: BUY/SELL/HOLD SYMBOL $AMOUNT_TO_INVEST]
 CONFIDENCE: [0-100%]
+
+REMINDER: When specifying dollar amounts, use the amount you want to INVEST, not the stock price!
 """
 
         try:
@@ -559,22 +585,26 @@ CONFIDENCE: [0-100%]
         summary = self.portfolio_manager.get_summary()
 
         lines = [
-            f"Cash Available: ${summary['cash']:.2f}",
+            f"Cash Available for Trading: ${summary['cash']:.2f}",
             f"Total Portfolio Value: ${summary['total_value']:.2f}",
             f"Portfolio Return: {summary['total_return_pct']:.2f}%",
             "",
-            "Positions:"
+            "Current Holdings:"
         ]
 
         if summary['positions']:
+            has_positions = False
             for pos in summary['positions']:
                 if pos['shares'] > 0:
+                    has_positions = True
                     lines.append(
                         f"  {pos['symbol']}: {pos['shares']:.4f} shares @ ${pos['avg_cost']:.2f} "
                         f"(Current: ${pos['current_price']:.2f}, P/L: ${pos['profit_loss']:.2f})"
                     )
+            if not has_positions:
+                lines.append("  None (100% cash - ready to buy)")
         else:
-            lines.append("  None")
+            lines.append("  None (100% cash - ready to buy)")
 
         return "\n".join(lines)
 
@@ -628,6 +658,17 @@ CONFIDENCE: [0-100%]
         # Create stock price lookup
         stock_prices = {stock['symbol']: stock for stock in stocks}
 
+        # Extract confidence level from response
+        confidence_match = re.search(r'CONFIDENCE:\s*(\d+(?:\.\d+)?)\s*%?', llm_response, re.IGNORECASE)
+        confidence = 0.0
+        if confidence_match:
+            confidence = float(confidence_match.group(1))
+            # Convert from percentage to decimal if needed
+            if confidence > 1.0:
+                confidence = confidence / 100.0
+
+        logger.info(f"LLM trading confidence: {confidence*100:.0f}%")
+
         # Find all DECISION lines (including REVISED_DECISION)
         decision_pattern = r'(?:REVISED_)?DECISION:\s*(BUY|SELL|HOLD)\s+([A-Z]+)\s*\$?(\d+(?:\.\d+)?)?'
         decisions = re.findall(decision_pattern, llm_response, re.IGNORECASE)
@@ -636,7 +677,16 @@ CONFIDENCE: [0-100%]
             logger.debug("No trading decisions found in LLM response")
             return
 
-        logger.info(f"Found {len(decisions)} trading decision(s)")
+        # Check confidence threshold before executing ANY trades
+        if confidence < self.min_confidence_threshold:
+            logger.warning(
+                f"⚠ TRADES BLOCKED: LLM confidence {confidence*100:.0f}% < "
+                f"required {self.min_confidence_threshold*100:.0f}%"
+            )
+            logger.warning(f"  Decisions not executed: {decisions}")
+            return
+
+        logger.info(f"Found {len(decisions)} trading decision(s) - confidence threshold passed ✓")
 
         for action, symbol, amount_str in decisions:
             action = action.upper()
