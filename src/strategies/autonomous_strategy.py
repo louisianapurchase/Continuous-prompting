@@ -167,30 +167,45 @@ class AutonomousStrategy(BaseStrategy):
         Returns:
             Tuple of (should_activate: bool, reason: str)
         """
+        # Get portfolio status FIRST - this is critical context
+        portfolio_status = self._get_portfolio_status()
+
         # Format current market snapshot
         market_snapshot = self._format_market_snapshot(stocks)
 
         # Get recent context (last few data points)
         recent_context = self._get_recent_context(lookback=10)
 
-        # Build activation check prompt
+        # Build activation check prompt - PORTFOLIO STATUS AT THE TOP
         prompt = f"""You are monitoring live market data. Your job is to decide if the current market state requires your attention and analysis.
 
+═══════════════════════════════════════════════════════════════
+YOUR PORTFOLIO (MOST IMPORTANT - READ THIS FIRST):
+═══════════════════════════════════════════════════════════════
+{portfolio_status}
+
+═══════════════════════════════════════════════════════════════
 CURRENT MARKET STATE:
+═══════════════════════════════════════════════════════════════
 {market_snapshot}
 
+═══════════════════════════════════════════════════════════════
 RECENT MARKET ACTIVITY (last 10 data points):
+═══════════════════════════════════════════════════════════════
 {recent_context}
 
 MARKET VOLATILITY: {self.market_volatility:.4f}
 
+═══════════════════════════════════════════════════════════════
 QUESTION: Should you activate and perform a detailed analysis right now?
+═══════════════════════════════════════════════════════════════
 
 Think step-by-step:
-1. Is there any unusual price movement?
-2. Are there any emerging patterns?
-3. Is this just normal market noise?
-4. Would analyzing this lead to actionable insights?
+1. What positions do you currently hold? How are they performing?
+2. Is there any unusual price movement that affects your positions?
+3. Are there any emerging patterns or opportunities?
+4. Is this just normal market noise?
+5. Would analyzing this lead to actionable insights (buy/sell decisions)?
 
 Respond in JSON format:
 {{
@@ -199,7 +214,8 @@ Respond in JSON format:
     "confidence": 0.0-1.0
 }}
 
-Be selective - only activate when you see something genuinely interesting or actionable."""
+Be selective - only activate when you see something genuinely interesting or actionable.
+If you hold positions, consider activating if they're moving significantly (up or down).
 
         try:
             response = self.llm_client.chat(
@@ -326,17 +342,20 @@ Be selective - only activate when you see something genuinely interesting or act
 Now perform a detailed analysis using step-by-step reasoning.
 
 ═══════════════════════════════════════════════════════════════
-CURRENT MARKET STATE:
-═══════════════════════════════════════════════════════════════
-{market_snapshot}
-
-═══════════════════════════════════════════════════════════════
-YOUR PORTFOLIO:
+YOUR PORTFOLIO (MOST IMPORTANT - READ THIS FIRST):
 ═══════════════════════════════════════════════════════════════
 {portfolio_status}
 
-IMPORTANT: Check "Cash Available for Trading" above. If you have cash, you CAN buy stocks.
-If "Current Holdings" shows "None", you have NO positions and are 100% cash.
+CRITICAL REMINDERS:
+- If you have cash, you CAN buy stocks
+- If you hold positions, you CAN sell them (check profit/loss!)
+- If "Current Holdings" shows "None", you have NO positions and are 100% cash
+- Always check your current positions BEFORE making decisions
+
+═══════════════════════════════════════════════════════════════
+CURRENT MARKET STATE:
+═══════════════════════════════════════════════════════════════
+{market_snapshot}
 
 ═══════════════════════════════════════════════════════════════
 HISTORICAL CONTEXT:
@@ -420,13 +439,24 @@ DECISION: HOLD GOOGL
         """
         return f"""You activated yourself because: {activation_reason}
 
-CURRENT MARKET:
-{market_snapshot}
-
-YOUR PORTFOLIO:
+═══════════════════════════════════════════════════════════════
+YOUR PORTFOLIO (MOST IMPORTANT - READ THIS FIRST):
+═══════════════════════════════════════════════════════════════
 {portfolio_status}
 
+CRITICAL REMINDERS:
+- If you have cash, you CAN buy stocks
+- If you hold positions, you CAN sell them (check profit/loss!)
+- Always check your current positions BEFORE making decisions
+
+═══════════════════════════════════════════════════════════════
+CURRENT MARKET:
+═══════════════════════════════════════════════════════════════
+{market_snapshot}
+
+═══════════════════════════════════════════════════════════════
 HISTORICAL CONTEXT:
+═══════════════════════════════════════════════════════════════
 {context}
 
 Analyze the situation and make trading decisions.
@@ -460,9 +490,25 @@ Example: "DECISION: BUY AAPL $500" means invest $500 in AAPL (not buy at $500/sh
         reflection_prompt = f"""You just made the following analysis and trading decision:
 
 ═══════════════════════════════════════════════════════════════
+YOUR PORTFOLIO (MOST IMPORTANT - READ THIS FIRST):
+═══════════════════════════════════════════════════════════════
+{portfolio_status}
+
+CRITICAL REMINDERS:
+- If you have cash, you CAN buy stocks
+- If you hold positions, you CAN sell them (check profit/loss!)
+- Always verify you have cash before deciding to BUY
+- Always verify you own the stock before deciding to SELL
+
+═══════════════════════════════════════════════════════════════
 YOUR INITIAL ANALYSIS:
 ═══════════════════════════════════════════════════════════════
 {initial_analysis}
+
+═══════════════════════════════════════════════════════════════
+CURRENT MARKET (for reference):
+═══════════════════════════════════════════════════════════════
+{market_snapshot}
 
 ═══════════════════════════════════════════════════════════════
 SELF-REFLECTION TASK:
@@ -474,6 +520,7 @@ Now step back and critique your own decision:
    - Did you check if you have enough cash before deciding to BUY?
    - Did you verify you own the stock before deciding to SELL?
    - Are your decisions based on solid reasoning or emotion?
+   - If you hold a position, should you consider SELLING it (take profit/cut losses)?
 
 2. RISK ASSESSMENT:
    - What's the worst-case scenario if this trade goes wrong?
@@ -489,12 +536,6 @@ Now step back and critique your own decision:
    - Do you stand by your original decision? (YES/NO)
    - If NO, what should you do instead?
    - Confidence level: (0-100%)
-
-CURRENT MARKET (for reference):
-{market_snapshot}
-
-YOUR PORTFOLIO (for reference):
-{portfolio_status}
 
 Respond with:
 REFLECTION: [Your self-critique]

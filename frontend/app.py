@@ -93,8 +93,14 @@ def create_components(settings: dict) -> AutonomousStrategy:
             price_volatility=settings['volatility'],
         )
     else:
-        # Ensure CSV data is available (download if needed)
-        logger.info("Checking for CSV data...")
+        # Delete old CSV and download fresh data every time
+        import os
+        if os.path.exists(settings['csv_path']):
+            logger.info(f"Deleting old CSV: {settings['csv_path']}")
+            os.remove(settings['csv_path'])
+
+        # Download fresh CSV data
+        logger.info("Downloading fresh CSV data...")
         ensure_data_available(
             symbols=settings['symbols'],
             csv_path=settings['csv_path']
